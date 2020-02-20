@@ -70,23 +70,3 @@ def discover_streams(config):
         )
 
     return streams
-
-def test_schema():
-    report_url = 'INSERT REPORT URL HERE'
-    username = 'INSERT USERNAME HERE'
-    password = 'INSERT PASSWORD HERE'
-
-    report = {'report_url': report_url}
-
-    config = {
-        'username': username,
-        'password': password,
-        'reports': '''[
-            {
-                "report_url": "INSERT REPORT URL HERE",
-                "table_name": "THIS IS MY TABLE"
-            }
-        ]'''
-    }
-
-    return discover_streams(config)
