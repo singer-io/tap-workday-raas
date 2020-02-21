@@ -1,6 +1,6 @@
-import requests
 from xml.etree import ElementTree
 import io
+import requests
 
 def stream_report(report_url, user, password):
     with requests.get(report_url, auth=(user, password), stream=True) as resp:

@@ -1,4 +1,3 @@
-import json
 import time
 import singer
 from singer import metadata, utils, Transformer
@@ -6,7 +5,7 @@ from tap_workday_raas.client import stream_report
 
 LOGGER = singer.get_logger()
 
-def sync_report(report, stream, state, config):
+def sync_report(report, stream, config):
     report_url = report['report_url']
     username = config['username']
     password = config['password']
@@ -27,7 +26,7 @@ def sync_report(report, stream, state, config):
             elem_name = elem.tag.split('}')[1]
             if elem_name == 'Report_Data':
                 continue
-            elif elem_name == 'Report_Entry':
+            if elem_name == 'Report_Entry':
                 if event == 'end':
                     to_write = transformer.transform(record, stream.schema.to_dict(), metadata.to_map(stream.metadata))
                     to_write['_sdc_extracted_at'] = extraction_time

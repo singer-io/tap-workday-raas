@@ -4,7 +4,6 @@ import singer
 
 from singer import metadata
 from singer import utils
-from singer import catalog
 from tap_workday_raas.discover import discover_streams
 from tap_workday_raas.sync import sync_report
 
@@ -35,11 +34,11 @@ def do_sync(config, catalog, state):
 
         state = singer.set_currently_syncing(state, stream_name)
         singer.write_state(state)
-        key_properties = metadata.get(metadata.to_map(stream.metadata), (), "table-key-properties") or []
+        key_properties = metadata.get(mdata, (), "table-key-properties") or []
         singer.write_schema(stream_name, stream.schema.to_dict(), key_properties)
 
         LOGGER.info("%s: Starting sync", stream_name)
-        counter_value = sync_report(report, stream, state, config)
+        counter_value = sync_report(report, stream, config)
         LOGGER.info("%s: Completed sync (%s rows)", stream_name, counter_value)
 
     state = singer.set_currently_syncing(state, None)

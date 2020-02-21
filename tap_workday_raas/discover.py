@@ -1,9 +1,7 @@
 import json
-import singer
 from xml.etree import ElementTree
+import singer
 
-from singer import metadata
-from singer.catalog import Catalog, CatalogEntry, Schema
 from singer import metadata
 
 from tap_workday_raas.client import download_xsd
@@ -11,7 +9,7 @@ from tap_workday_raas.client import download_xsd
 LOGGER = singer.get_logger()
 
 def _type_to_schema(elem_type):
-    if elem_type == 'date' or elem_type == 'dateTime':
+    if elem_type in ('date', 'dateTime'):
         return {
             'type': ['string', 'null'],
             'format': 'date-time'
@@ -31,10 +29,10 @@ def get_schema_for_report(report, username, password):
     schema = {'type': 'object', 'properties': {}}
 
 
-    for base_elem in xsd_schema_et.getchildren():
+    for base_elem in xsd_schema_et:
         if base_elem.attrib['name'] == 'Report_EntryType':
-            for sequence in base_elem.getchildren():
-                for elem in sequence.getchildren():
+            for sequence in base_elem:
+                for elem in sequence:
                     elem_type = elem.attrib['type'].split(':')[1]
                     elem_name = elem.attrib['name']
 
