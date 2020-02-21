@@ -6,7 +6,7 @@ from singer import metadata
 from singer.catalog import Catalog, CatalogEntry, Schema
 from singer import metadata
 
-from client import download_xsd
+from tap_workday_raas.client import download_xsd
 
 LOGGER = singer.get_logger()
 
@@ -54,7 +54,7 @@ def discover_streams(config):
     password = config['password']
 
     for report in reports:
-        LOGGER.info('Downloading XSD to determine table schema "%s".', report['table_name']) # TODO get table name
+        LOGGER.info('Downloading XSD to determine table schema "%s".', report['report_name']) # TODO get table name
         schema = get_schema_for_report(report, username, password)
 
         stream_md = metadata.get_standard_metadata(schema,
@@ -62,8 +62,8 @@ def discover_streams(config):
                                                    replication_method='FULL_TABLE')
         streams.append(
             {
-                'stream': report['table_name'],
-                'tap_stream_id': report['table_name'],
+                'stream': report['report_name'],
+                'tap_stream_id': report['report_name'],
                 'schema': schema,
                 'metadata': stream_md
             }

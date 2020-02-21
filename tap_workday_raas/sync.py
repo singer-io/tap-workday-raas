@@ -20,6 +20,8 @@ def sync_report(report, stream, state, config):
     stream_version = int(time.time() * 1000)
     extraction_time = utils.now().isoformat()
 
+    singer.write_version(stream.tap_stream_id, stream_version)
+
     with Transformer() as transformer:
         for event, elem in stream_report(report_url, username, password):
             elem_name = elem.tag.split('}')[1]
@@ -27,7 +29,6 @@ def sync_report(report, stream, state, config):
                 continue
             elif elem_name == 'Report_Entry':
                 if event == 'end':
-                    LOGGER.info("WRITE RECORD")
                     to_write = transformer.transform(record, stream.schema.to_dict(), metadata.to_map(stream.metadata))
                     to_write['_sdc_extracted_at'] = extraction_time
                     record_message = singer.RecordMessage(stream.tap_stream_id,
@@ -41,5 +42,3 @@ def sync_report(report, stream, state, config):
 
 
     return record_count
-
-
