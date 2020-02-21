@@ -1,4 +1,5 @@
 import json
+import time
 import singer
 from singer import metadata, utils, Transformer
 from tap_workday_raas.client import stream_report
@@ -16,7 +17,8 @@ def sync_report(report, stream, state, config):
 
     record = {}
 
-    version = utils.now()
+    stream_version = int(time.time() * 1000)
+    extraction_time = utils.now().isoformat()
 
     with Transformer() as transformer:
         for event, elem in stream_report(report_url, username, password):
@@ -27,9 +29,13 @@ def sync_report(report, stream, state, config):
                 if event == 'end':
                     LOGGER.info("WRITE RECORD")
                     to_write = transformer.transform(record, stream.schema.to_dict(), metadata.to_map(stream.metadata))
-                    singer.write_record(stream.tap_stream_id, to_write)
+                    to_write['_sdc_extracted_at'] = extraction_time
+                    record_message = singer.RecordMessage(stream.tap_stream_id,
+                                                          to_write,
+                                                          version=stream_version)
+                    singer.write_message(record_message)
                     record_count += 1
-                    record = {'_sdc_extracted_at': utils.now()}
+                    record = {}
             elif event == 'start':
                 record[elem_name] = elem.text
 
