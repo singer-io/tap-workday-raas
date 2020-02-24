@@ -52,7 +52,7 @@ def discover_streams(config):
     password = config['password']
 
     for report in reports:
-        LOGGER.info('Downloading XSD to determine table schema "%s".', report['report_name']) # TODO get table name
+        LOGGER.info('Downloading XSD to determine table schema "%s".', report['report_name'])
         schema = get_schema_for_report(report, username, password)
 
         stream_md = metadata.get_standard_metadata(schema,

@@ -7,7 +7,7 @@ from singer import utils
 from tap_workday_raas.discover import discover_streams
 from tap_workday_raas.sync import sync_report
 
-REQUIRED_CONFIG_KEYS = ["username", "password", "reports"] # TODO May have to change how we handle reports once dynamic streams is released
+REQUIRED_CONFIG_KEYS = ["username", "password", "reports"]
 LOGGER = singer.get_logger()
 
 def do_discover(config):
