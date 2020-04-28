@@ -37,7 +37,12 @@ def sync_report(report, stream, config):
                     record_count += 1
                     record = {}
             elif event == 'start':
-                record[elem_name] = elem.text
-
+                # If the streaming element has children, its a complexType
+                if elem.getchildren():
+                    record[elem_name] = {}
+                    for child in elem.getchildren():
+                        record[elem_name][child.tag.split('}')[1]] = child.text
+                else:
+                    record[elem_name] = elem.text
 
     return record_count
