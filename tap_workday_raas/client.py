@@ -9,7 +9,7 @@ def stream_report(report_url, user, password):
                 context = ElementTree.iterparse(stream, events=("start", "end"))
                 for event, elem in context:
                     yield (event, elem)
-            except ElementTree.ParseError as e:
+            except ElementTree.ParseError:
                 raise Exception("Report URL {} does not parse as XML. Please ensure the integration is configured with the correct URL".format(report_url))
 
 def download_xsd(report_url, user, password):
