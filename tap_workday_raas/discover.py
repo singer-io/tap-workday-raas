@@ -8,19 +8,39 @@ from tap_workday_raas.client import download_xsd
 
 LOGGER = singer.get_logger()
 
-def _type_to_schema(elem_type):
+def _element_to_schema(element):
+    elem_type = element.attrib['type'].split(':')[1]
+    is_nullable = element.attrib.get('minOccurs') == '0'
+    # NB: The only actual value I've seen for maxOccurs is "unbounded". There may be other possible values
+    is_list = element.attrib.get("maxOccurs") == 'unbounded'
+
+    schema = {}
+
     if elem_type in ('date', 'dateTime'):
-        return {
-            'type': ['string', 'null'],
+        schema = {
+            'type': ['string'],
             'format': 'date-time'
         }
     elif elem_type == 'decimal':
         #TODO What else do we need for decimal types?
-        return {
-            'type': ['number', 'null']
+        schema = {
+            'type': ['number'],
+            'format': 'decimal'
         }
     else:
-        return {'type': [elem_type, 'null']}
+        schema = {'type': [elem_type]}
+
+    if is_nullable:
+        schema['type'].append('null')
+
+    if is_list:
+        LOGGER.info("FOUND A LIST!: %s", element.attrib['name'])
+        schema = {
+            'type': 'array',
+            'items': schema
+        }
+
+    return schema
 
 # TODO: Test this logic
 def parse_complex_type(complex_type_selectors, xsd_schema_et, ns):
@@ -31,18 +51,15 @@ def parse_complex_type(complex_type_selectors, xsd_schema_et, ns):
         complex_type_mapping[name] = {'type': 'object', 'properties': {}}
         for element in complex_type.findall('.//xsd:element', ns):
             elem_name = element.attrib['name']
-            elem_type = element.attrib['type'].split(':')[1]
-            schema_type = _type_to_schema(elem_type)
+            schema_type = _element_to_schema(element)
             complex_type_mapping[name]['properties'][elem_name] = {
                 **schema_type
             }
 
     return complex_type_mapping
 
-# TODO: refactor this so we can test it.
-def get_schema_for_report(report, username, password):
-    xsd_schema = download_xsd(report['report_url'], username, password)
-    xsd_schema_et = ElementTree.fromstring(xsd_schema)
+def generate_schema_for_report(xsd):
+    xsd_schema_et = ElementTree.fromstring(xsd)
     ns = {'xsd': 'http://www.w3.org/2001/XMLSchema'}
 
     schema = {'type': 'object', 'properties': {}}
@@ -64,14 +81,22 @@ def get_schema_for_report(report, username, password):
 
         # When elem's type attribute is a type defined as its own complexType - a nested object
         if elem_type in complex_type_mapping:
-            schema['properties'][elem_name] = complex_type_mapping[elem_type]
-            continue
 
-        schema_type = _type_to_schema(elem_type)
+            # TODO Check if the element is a list and type it correctly
+            is_list = elem.attrib.get("maxOccurs") == 'unbounded'
 
-        schema['properties'][elem_name] = {
-            **schema_type
-        }
+            if not is_list:
+                elem_schema = complex_type_mapping[elem_type]
+            else:
+                elem_schema = {'type': 'array',
+                               'items': complex_type_mapping[elem_type]}
+            schema['properties'][elem_name] = elem_schema
+        else:
+            schema_type = _element_to_schema(elem)
+
+            schema['properties'][elem_name] = {
+                **schema_type
+            }
     return schema
 
 def discover_streams(config):
@@ -84,7 +109,9 @@ def discover_streams(config):
 
     for report in reports:
         LOGGER.info('Downloading XSD to determine table schema "%s".', report['report_name'])
-        schema = get_schema_for_report(report, username, password)
+
+        xsd = download_xsd(report['report_url'], username, password)
+        schema = generate_schema_for_report(xsd)
 
         stream_md = metadata.get_standard_metadata(schema,
                                                    key_properties=report.get('key_properties'),
