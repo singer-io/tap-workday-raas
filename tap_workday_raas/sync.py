@@ -37,6 +37,8 @@ def sync_report(report, stream, config):
                     record_count += 1
                     record = {}
             elif event == 'start':
+                #TODO Check if there are multiple of the element. If yes then parse them as an array
+
                 # If the streaming element has children, its a complexType
                 if elem.getchildren():
                     record[elem_name] = {}
