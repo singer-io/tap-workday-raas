@@ -1,20 +1,34 @@
-from xml.etree import ElementTree
-import io
 import requests
 
 def stream_report(report_url, user, password):
-    with requests.get(report_url, auth=(user, password), stream=True) as resp:
-        with io.BytesIO(resp.content) as stream:
-            try:
-                context = ElementTree.iterparse(stream, events=("start", "end"))
-                for event, elem in context:
-                    yield (event, elem)
-            except ElementTree.ParseError:
-                raise Exception("Report URL {} does not parse as XML. Please ensure the integration is configured with the correct URL".format(report_url))
+    # Force the format query param to be set to format=json
+
+    # Split query params off
+    url_breakdown = report_url.split('?')
+
+    # Gather all params that are not format
+    if len(url_breakdown) == 1:
+        params = []
+    else:
+        params = [x for x in url_breakdown[1].split('&') if not x.startswith('format')]
+
+    # Add the format param
+    params.append('format=json')
+    param_string = '&'.join(params)
+
+    # Put the url back together
+    corrected_url = url_breakdown[0] + '?' + param_string
+
+    # Get the data
+    with requests.get(corrected_url, auth=(user, password), stream=True) as resp:
+        resp.raise_for_status()
+        report = resp.json() # TODO Check that this is streaming. I worry that calling json() pulls down the whole file
+        for record in report['Report_Entry']:
+            yield record
 
 def download_xsd(report_url, user, password):
     if '?' in report_url:
-        xsds_url = report_url.split('?')[0] + '?xsds'
+        xsds_url = report_url.split('?')[0] + '?xsd'
     else:
         xsds_url = report_url + '?xsds'
     response = requests.get(xsds_url, auth=(user, password))
