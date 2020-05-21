@@ -28,7 +28,7 @@ def stream_report(report_url, user, password):
 
 def download_xsd(report_url, user, password):
     if '?' in report_url:
-        xsds_url = report_url.split('?')[0] + '?xsd'
+        xsds_url = report_url.split('?')[0] + '?xsds'
     else:
         xsds_url = report_url + '?xsds'
     response = requests.get(xsds_url, auth=(user, password))
