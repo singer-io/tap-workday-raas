@@ -34,7 +34,6 @@ def _element_to_schema(element):
         schema['type'].append('null')
 
     if is_list:
-        LOGGER.info("FOUND A LIST!: %s", element.attrib['name'])
         schema = {
             'type': 'array',
             'items': schema
