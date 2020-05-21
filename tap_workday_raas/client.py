@@ -22,7 +22,7 @@ def stream_report(report_url, user, password):
     # Get the data
     with requests.get(corrected_url, auth=(user, password), stream=True) as resp:
         resp.raise_for_status()
-        report = resp.json() # TODO Check that this is streaming. I worry that calling json() pulls down the whole file
+        report = resp.json() # TODO Check that this is streaming. I don't think it is
         for record in report['Report_Entry']:
             yield record
 
