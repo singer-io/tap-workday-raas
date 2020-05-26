@@ -26,10 +26,9 @@ def _element_to_schema(element):
             'format': 'date-time'
         }
     elif elem_type == 'decimal':
-        #TODO What else do we need for decimal types?
+        # TODO Update to the singer.decimal format when that is available
         schema = {
             'type': ['number'],
-            'format': 'singer-decimal'
         }
     else:
         schema = {'type': [elem_type]}
