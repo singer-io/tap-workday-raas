@@ -39,7 +39,7 @@ class WorkdayRaasSync(unittest.TestCase):
         return {
             'start_date' : '2015-03-15T00:00:00Z',
             'username': os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
-            'reports': json.dumps([{'report_url': 'https://wd2-impl-services1.workday.com/ccx/service/customreport2/talend_dpt1/lmcneil/Stitch_Testing_2?format=simplexml',
+            'reports': json.dumps([{'report_url': 'https://wd2-impl-services1.workday.com/ccx/service/customreport2/talend_dpt1/lmcneil/Stitch_Testing_2',
                                     'report_name': 'stitch_test_report'}]),
         }
 
