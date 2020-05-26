@@ -12,7 +12,7 @@ def _element_to_schema(element):
     elem_type = element.attrib['type'].split(':')[1]
     is_nullable = element.attrib.get('minOccurs') == '0'
 
-    max_occurs = elem.attrib.get("maxOccurs")
+    max_occurs = element.attrib.get("maxOccurs")
     if max_occurs not in (None, "unbounded"):
         raise Exception("Found unexpected value for maxOccurs attribute.")
 
@@ -90,7 +90,7 @@ def generate_schema_for_report(xsd):
 
             is_list = max_occurs == 'unbounded'
 
-            if is_list: 
+            if is_list:
                 elem_schema = {'type': 'array',
                                'items': complex_type_mapping[elem_type]}
             else:
