@@ -5,6 +5,8 @@ import os
 import unittest
 from functools import reduce
 
+import json
+
 class WorkdayRaasSync(unittest.TestCase):
     def setUp(self):
         missing_envs = [x for x in [os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
@@ -35,9 +37,10 @@ class WorkdayRaasSync(unittest.TestCase):
 
     def get_properties(self):
         return {
-            'start_date' : '2015-03-15 00:00:00',
+            'start_date' : '2015-03-15T00:00:00Z',
             'username': os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
-            'reports': '[{\"report_url\":\"https://i-0705abe4c72d24e6a.workdaysuv.com/ccx/service/customreport2/gms/lmcneil/stitch_test_report?End_Date=2020-02-19-08:00&Start_Date=2020-02-12-08:00\",\"report_name\":\"stitch_test_report\"}]'
+            'reports': json.dumps([{'report_url': 'https://wd2-impl-services1.workday.com/ccx/service/customreport2/talend_dpt1/lmcneil/Stitch_Testing_2',
+                                    'report_name': 'stitch_test_report'}]),
         }
 
     def test_run(self):
