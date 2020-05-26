@@ -11,7 +11,7 @@ def stream_report(report_url, user, password):
     if len(url_breakdown) == 1:
         params = []
     else:
-        params = [x for x in url_breakdown[1].split('&') if not x.startswith('format')]
+        params = [x for x in url_breakdown[1].split('&') if not x.startswith('format=')]
 
     # Add the format param
     params.append('format=json')

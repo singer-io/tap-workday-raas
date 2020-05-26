@@ -11,8 +11,12 @@ LOGGER = singer.get_logger()
 def _element_to_schema(element):
     elem_type = element.attrib['type'].split(':')[1]
     is_nullable = element.attrib.get('minOccurs') == '0'
-    # NB: The only actual value I've seen for maxOccurs is "unbounded". There may be other possible values
-    is_list = element.attrib.get("maxOccurs") == 'unbounded'
+
+    max_occurs = elem.attrib.get("maxOccurs")
+    if max_occurs not in (None, "unbounded"):
+        raise Exception("Found unexpected value for maxOccurs attribute.")
+
+    is_list = max_occurs == 'unbounded'
 
     schema = {}
 
@@ -25,7 +29,7 @@ def _element_to_schema(element):
         #TODO What else do we need for decimal types?
         schema = {
             'type': ['number'],
-            'format': 'decimal'
+            'format': 'singer-decimal'
         }
     else:
         schema = {'type': [elem_type]}
@@ -41,7 +45,6 @@ def _element_to_schema(element):
 
     return schema
 
-# TODO: Test this logic
 def parse_complex_type(complex_type_selectors, xsd_schema_et, ns):
     complex_type_mapping = {}
     for selector in complex_type_selectors:
@@ -81,14 +84,17 @@ def generate_schema_for_report(xsd):
         # When elem's type attribute is a type defined as its own complexType - a nested object
         if elem_type in complex_type_mapping:
 
-            # TODO Check if the element is a list and type it correctly
-            is_list = elem.attrib.get("maxOccurs") == 'unbounded'
+            max_occurs = elem.attrib.get("maxOccurs")
+            if max_occurs not in (None, "unbounded"):
+                raise Exception("Found unexpected value for maxOccurs attribute.")
 
-            if not is_list:
-                elem_schema = complex_type_mapping[elem_type]
-            else:
+            is_list = max_occurs == 'unbounded'
+
+            if is_list: 
                 elem_schema = {'type': 'array',
                                'items': complex_type_mapping[elem_type]}
+            else:
+                elem_schema = complex_type_mapping[elem_type]
             schema['properties'][elem_name] = elem_schema
         else:
             schema_type = _element_to_schema(elem)
