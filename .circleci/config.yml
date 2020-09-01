@@ -10,7 +10,7 @@ jobs:
           command: |
             python3 -mvenv /usr/local/share/virtualenvs/tap-workday-raas
             source /usr/local/share/virtualenvs/tap-workday-raas/bin/activate
-            pip install -U 'pip<19.2' setuptools
+            pip install -U 'pip<19.2' setuptools==49.3.0
             pip install .[dev]
       - run:
           name: 'pylint'
