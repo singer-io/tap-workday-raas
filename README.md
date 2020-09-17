@@ -36,7 +36,7 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
    {
        "username": "<username>",
        "password": "<password>",
-       "reports": "[{"report_name": "abitrary_name", "report_url": "https://..."}, ...]"
+       "reports": "[{\"report_name\": \"abitrary_name\", \"report_url\": \"https://...\"}, ...]"
    }
    ```
 
