@@ -17,28 +17,28 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
 
 ## Install
 
-    Clone this repository, and then install using setup.py. We recommend using a virtualenv:
+   Clone this repository, and then install using setup.py. We recommend using a virtualenv:
 
-    ```bash
-    $ virtualenv -p python3 venv
-    $ source venv/bin/activate
-    $ pip install -e .
-    ```
+   ```bash
+   $ virtualenv -p python3 venv
+   $ source venv/bin/activate
+   $ pip install -e .
+   ```
 ## Create Config
 
-    Create your tap's `config.json` file.  The tap config file for this tap should include these entries:
+   Create your tap's `config.json` file.  The tap config file for this tap should include these entries:
 
-    - `username` - The username of the workday account with access to the reports to extract
-    - `password` - The password of the workday account with access to the reports to extract
-    - `reports` -  A JSON string containing a list of objects containing the `report_name` and `report_url`. `report_name` is the name of the stream for the report, and the `report_url` is the URL to the Workday XML REST link for the report you wish to extract.
+   - `username` - The username of the workday account with access to the reports to extract
+   - `password` - The password of the workday account with access to the reports to extract
+   - `reports` -  A JSON string containing a list of objects containing the `report_name` and `report_url`. `report_name` is the name of the stream for the report, and the `report_url` is the URL to the Workday XML REST link for the report you wish to extract.
 
-    ```json
-    {
-        "username": "<username>",
-        "password": "<password>",
-        "reports": "[{"report_name": "abitrary_name", "report_url": "https://..."}, ...]"
-    }
-    ```
+   ```json
+   {
+       "username": "<username>",
+       "password": "<password>",
+       "reports": "[{"report_name": "abitrary_name", "report_url": "https://..."}, ...]"
+   }
+   ```
 
 ## Run Discovery
 
