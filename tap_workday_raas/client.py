@@ -24,6 +24,17 @@ def stream_report(report_url, user, password):
     with requests.get(corrected_url, auth=(user, password), stream=True) as resp:
         resp.raise_for_status()
 
+        # Get the header as a dictionary and Split the Content-Type string value into a list by '; '
+        # filter list by 'charset='
+        # return the first item in the list (the only item)
+        # strip 'charset='
+        content_headers_list = resp.headers['Content-Type'].split('; ')
+        v_encoding_key = 'charset='
+        try:
+            v_encoding = next(filter(lambda x: x.startswith(v_encoding_key), content_headers_list)).lstrip(v_encoding_key)
+        except:
+            v_encoding = resp.encoding
+
         # Set up our search key
         report_entry_key = b'Report_Entry'
         search_prefix = report_entry_key.decode('utf-8') + '.item'
@@ -43,7 +54,7 @@ def stream_report(report_url, user, password):
         for chunk in resp.iter_content(chunk_size=512):
             if report_entry_key in chunk:
                 found_key = True
-            coro.send(chunk)
+            coro.send(chunk.decode(v_encoding))
             for rec in records:
                 yield rec
             del records[:]
