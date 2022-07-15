@@ -83,7 +83,7 @@ def generate_schema_for_report(xsd):
             is_list = max_occurs == "unbounded"
 
             if is_list:
-                elem_schema = {"type": "array", "items": complex_type_mapping[elem_type],}
+                elem_schema = {"type": "array", "items": complex_type_mapping[elem_type]}
             else:
                 elem_schema = complex_type_mapping[elem_type]
             schema["properties"][elem_name] = elem_schema
