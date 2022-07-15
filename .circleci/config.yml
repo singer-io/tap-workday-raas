@@ -9,14 +9,9 @@ jobs:
           name: 'Setup virtual env'
           command: |
             python3 -mvenv /usr/local/share/virtualenvs/tap-workday-raas
-            source /usr/local/share/virtualenvs/tap-dixa/bin/activate
+            source /usr/local/share/virtualenvs/tap-workday-raas/bin/activate
             pip install -U 'pip<19.2' 'setuptools<51.0.0'
-            pip install .[dev]
-      - run:
-          name: 'JSON Validator'
-          command: |
-            source /usr/local/share/virtualenvs/tap-tester/bin/activate
-            stitch-validate-json tap_dixa/schemas/*.json
+            pip install .
       - run:
           name: 'Pylint'
           command: |
