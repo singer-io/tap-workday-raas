@@ -18,6 +18,7 @@ jobs:
             source /usr/local/share/virtualenvs/tap-workday-raas/bin/activate
             pip install pylint==2.14.1
             pylint tap_workday_raas --disable C,W,R,no-member
+      - add_ssh_keys
       - run:
           name: 'Integration Tests'
           command: |
