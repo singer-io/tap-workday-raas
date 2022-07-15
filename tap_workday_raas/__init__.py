@@ -10,6 +10,7 @@ from tap_workday_raas.sync import sync_report
 REQUIRED_CONFIG_KEYS = ["username", "password", "reports"]
 LOGGER = singer.get_logger()
 
+
 def do_discover(config):
     LOGGER.info("Starting discover")
     streams = discover_streams(config)
@@ -19,13 +20,15 @@ def do_discover(config):
     json.dump(catalog, sys.stdout, indent=2)
     LOGGER.info("Finished discover")
 
+
 def stream_is_selected(mdata):
-    return mdata.get((), {}).get('selected', False)
+    return mdata.get((), {}).get("selected", False)
+
 
 def do_sync(config, catalog, state):
-    LOGGER.info('Starting sync.')
+    LOGGER.info("Starting sync.")
 
-    reports = { report['report_name']: report for report in json.loads(config['reports']) }
+    reports = {report["report_name"]: report for report in json.loads(config["reports"])}
 
     for stream in catalog.get_selected_streams(state):
         stream_name = stream.tap_stream_id
@@ -43,7 +46,8 @@ def do_sync(config, catalog, state):
 
     state = singer.set_currently_syncing(state, None)
     singer.write_state(state)
-    LOGGER.info('Done syncing.')
+    LOGGER.info("Done syncing.")
+
 
 @singer.utils.handle_top_exception(LOGGER)
 def main():
@@ -54,5 +58,6 @@ def main():
     elif args.catalog or args.properties:
         do_sync(args.config, args.catalog, args.state)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
