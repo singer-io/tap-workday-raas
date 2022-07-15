@@ -83,8 +83,7 @@ def generate_schema_for_report(xsd):
             is_list = max_occurs == "unbounded"
 
             if is_list:
-                elem_schema = {"type": "array",
-                               "items": complex_type_mapping[elem_type],}
+                elem_schema = {"type": "array", "items": complex_type_mapping[elem_type],}
             else:
                 elem_schema = complex_type_mapping[elem_type]
             schema["properties"][elem_name] = elem_schema
@@ -111,13 +110,13 @@ def discover_streams(config):
 
         stream_md = metadata.get_standard_metadata(schema,
                                                    key_properties=report.get("key_properties"),
-                                                   replication_method="FULL_TABLE",)
+                                                   replication_method="FULL_TABLE")
         streams.append(
             {
                 "stream": report["report_name"],
                 "tap_stream_id": report["report_name"],
                 "schema": schema,
-                "metadata": stream_md,
+                "metadata": stream_md
             }
         )
 
