@@ -9,14 +9,34 @@ jobs:
           name: 'Setup virtual env'
           command: |
             python3 -mvenv /usr/local/share/virtualenvs/tap-workday-raas
-            source /usr/local/share/virtualenvs/tap-workday-raas/bin/activate
-            pip install -U 'pip<19.2' setuptools==49.3.0
+            source /usr/local/share/virtualenvs/tap-dixa/bin/activate
+            pip install -U 'pip<19.2' 'setuptools<51.0.0'
             pip install .[dev]
       - run:
-          name: 'pylint'
+          name: 'JSON Validator'
+          command: |
+            source /usr/local/share/virtualenvs/tap-tester/bin/activate
+            stitch-validate-json tap_dixa/schemas/*.json
+      - run:
+          name: 'Pylint'
           command: |
             source /usr/local/share/virtualenvs/tap-workday-raas/bin/activate
-            make test
+            pip install pylint==2.14.1
+            pylint tap_workday_raas --disable C,W,R,no-member
+      - add_ssh_keys
+      - run:
+          name: 'Unit Tests'
+          command: |
+            source /usr/local/share/virtualenvs/tap-workday-raas/bin/activate
+            pip install nose coverage
+            nosetests --with-coverage --cover-erase --cover-package=tap_workday_raas --cover-html-dir=htmlcov tests/unittests
+            coverage html
+      - store_test_results:
+          path: test_output/report.xml
+      - store_artifacts:
+          path: htmlcov
+      - run:
+          name: 'Integration Tests'
           command: |
             aws s3 cp s3://com-stitchdata-dev-deployment-assets/environments/tap-tester/tap_tester_sandbox dev_env.sh
             source dev_env.sh
