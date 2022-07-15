@@ -13,7 +13,7 @@ class WorkdayTransformer(Transformer):
                 return True, False
             try:
                 return True, bool(data)
-            except:
+            except Exception as _:
                 return False, None
 
         else:
