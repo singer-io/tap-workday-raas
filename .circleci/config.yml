@@ -6,6 +6,10 @@ jobs:
     steps:
       - checkout
       - run:
+          name: 'checking python version'
+          command: |
+            python3 --version      
+      - run:
           name: 'Setup virtual env'
           command: |
             python3 -mvenv /usr/local/share/virtualenvs/tap-workday-raas
