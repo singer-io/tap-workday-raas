@@ -1,6 +1,9 @@
 import requests
 import ijson
 
+import singer
+LOGGER = singer.get_logger()
+
 
 def stream_report(report_url, user, password):
     # Force the format query param to be set to format=json
@@ -42,9 +45,12 @@ def stream_report(report_url, user, password):
 
         found_key = False
         for chunk in resp.iter_content(chunk_size=512):
+            LOGGER.info("chunk type originally:%s", type(chunk))
             if report_entry_key in chunk:
                 found_key = True
+            chunk = chunk.decode("utf-8")
             coro.send(chunk)
+            LOGGER.info("chunk type:%s , search_prefix:%s", type(chunk), type(search_prefix))
             for rec in records:
                 yield rec
             del records[:]
