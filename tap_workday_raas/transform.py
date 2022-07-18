@@ -9,7 +9,7 @@ class WorkdayTransformer(Transformer):
         if self.pre_hook:
             data = self.pre_hook(data, typ, schema)
         if typ == "boolean":
-            if isinstance(data, str) and (data.lower() in "false", "0"):
+            if isinstance(data, str) and (data.lower() in ("false", "0")):
                 return True, False
             try:
                 return True, bool(data)

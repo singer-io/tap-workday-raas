@@ -41,9 +41,14 @@ def stream_report(report_url, user, password):
         coro = ijson.items_coro(records, search_prefix)
 
         found_key = False
-        for chunk in resp.iter_content(chunk_size=512):
+        for chunk in resp.iter_content(chunk_size=512):           
             if report_entry_key in chunk:
                 found_key = True
+            """
+            Code changes to convert chunk from byte to Str
+            So that the code changes will be compatible with python version 3.9.6
+            """
+            chunk = chunk.decode("utf-8")
             coro.send(chunk)
             for rec in records:
                 yield rec
