@@ -1,5 +1,5 @@
 import unittest
-from tap_workday_raas.transform import Transformer
+from tap_workday_raas.transform import WorkdayTransformer as Transformer
 
 class TestBooleanTransform(unittest.TestCase):
     """Test Case to Check Valid Boolean Transformation"""
