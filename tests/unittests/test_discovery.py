@@ -36,10 +36,11 @@ xsd = """<?xml version="1.0" encoding="UTF-8"?>
 
 class DiscoveryTest(unittest.TestCase):
 
+
     def test_generate_schema_for_report(self):
 
         expected = {'properties':
-                    {'Average_Pay_-_Amount': {'format': 'decimal',
+                    {'Average_Pay_-_Amount': {
                                               'type': ['number', 'null']},
                      'Business_Unit_or_Business_Unit_Hierarchy_Container': {'type': ['string', 'null']},
                      'Candidate_Details_group': {'items':
