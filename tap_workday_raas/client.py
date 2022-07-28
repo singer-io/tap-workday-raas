@@ -1,5 +1,6 @@
 import requests
-import ijson
+import ijson.backends.yajl2_c as ijson
+import ijson as ijson_core
 
 
 def stream_report(report_url, user, password):
@@ -37,7 +38,7 @@ def stream_report(report_url, user, password):
         # 'Report_Entry' key because if we do not find it the parser
         # yields 0 records instead of failing and this allows us to know
         # if the schema is changed
-        records = ijson.sendable_list()
+        records = ijson_core.sendable_list()
         coro = ijson.items_coro(records, search_prefix)
 
         found_key = False
