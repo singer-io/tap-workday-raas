@@ -46,7 +46,6 @@ def stream_report(report_url, user, password):
                 found_key = True
             # Code changes to convert chunk from byte to Str
             # So that the code changes will be compatible with python version 3.9.6
-            chunk = chunk.decode("utf-8")
             coro.send(chunk)
             for rec in records:
                 yield rec
