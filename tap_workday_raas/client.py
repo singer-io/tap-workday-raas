@@ -1,5 +1,6 @@
 import requests
-import ijson
+import ijson.backends.yajl2_c as ijson
+import ijson as ijson_core
 
 
 def stream_report(report_url, user, password):
@@ -37,18 +38,13 @@ def stream_report(report_url, user, password):
         # 'Report_Entry' key because if we do not find it the parser
         # yields 0 records instead of failing and this allows us to know
         # if the schema is changed
-        records = ijson.sendable_list()
+        records = ijson_core.sendable_list()
         coro = ijson.items_coro(records, search_prefix)
 
         found_key = False
-        for chunk in resp.iter_content(chunk_size=512):           
+        for chunk in resp.iter_content(chunk_size=512):
             if report_entry_key in chunk:
                 found_key = True
-            """
-            Code changes to convert chunk from byte to Str
-            So that the code changes will be compatible with python version 3.9.6
-            """
-            chunk = chunk.decode("utf-8")
             coro.send(chunk)
             for rec in records:
                 yield rec
