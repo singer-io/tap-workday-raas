@@ -15,15 +15,28 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
 
 # Quickstart
 
-## Install
+Ensure poetry is installed on your machine. 
 
-   Clone this repository, and then install using setup.py. We recommend using a virtualenv:
+- This command will return the installed version of poetry if it is installed.
+```
+poetry --version
+```
 
-   ```bash
-   $ virtualenv -p python3 venv
-   $ source venv/bin/activate
-   $ pip install -e .
-   ```
+- If not, install poetry using the following commands (from https://python-poetry.org/docs/#installation):
+```
+curl -sSL https://install.python-poetry.org | python3 -
+PATH=~/.local/bin:$PATH
+```
+
+Within the `tap-workday-raas` directory, install dependencies:
+```
+poetry install
+```
+
+Then run the tap:
+```
+poetry run tap-workday-raas <options>
+```
 ## Create Config
 
    Create your tap's `config.json` file.  The tap config file for this tap should include these entries:
