@@ -28,7 +28,7 @@ def stream_is_selected(mdata):
 def do_sync(config, catalog, state):
     LOGGER.info("Starting sync.")
 
-    reports = {report["report_name"]: report for report in json.loads(config["reports"])}
+    reports = {report["report_name"]: report for report in config["reports"]}
 
     for stream in catalog.get_selected_streams(state):
         stream_name = stream.tap_stream_id

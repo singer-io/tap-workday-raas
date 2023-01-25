@@ -43,13 +43,13 @@ poetry run tap-workday-raas <options>
 
    - `username` - The username of the workday account with access to the reports to extract
    - `password` - The password of the workday account with access to the reports to extract
-   - `reports` -  A JSON string containing a list of objects containing the `report_name` and `report_url`. `report_name` is the name of the stream for the report, and the `report_url` is the URL to the Workday XML REST link for the report you wish to extract.
+   - `reports` -  An array containing a list of objects containing the `report_name` and `report_url`. `report_name` is the name of the stream for the report, and the `report_url` is the URL to the Workday XML REST link for the report you wish to extract.
 
    ```json
    {
        "username": "<username>",
        "password": "<password>",
-       "reports": "[{\"report_name\": \"abitrary_name\", \"report_url\": \"https://...\"}, ...]"
+       "reports": [{"report_name": "abitrary_name", "report_url": "https://..."},]
    }
    ```
 

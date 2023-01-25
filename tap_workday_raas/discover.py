@@ -97,7 +97,7 @@ def generate_schema_for_report(xsd):
 def discover_streams(config):
     streams = []
 
-    reports = json.loads(config["reports"])
+    reports = config["reports"]
 
     username = config["username"]
     password = config["password"]
