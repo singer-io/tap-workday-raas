@@ -15,28 +15,41 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
 
 # Quickstart
 
-## Install
+Ensure poetry is installed on your machine. 
 
-   Clone this repository, and then install using setup.py. We recommend using a virtualenv:
+- This command will return the installed version of poetry if it is installed.
+```
+poetry --version
+```
 
-   ```bash
-   $ virtualenv -p python3 venv
-   $ source venv/bin/activate
-   $ pip install -e .
-   ```
+- If not, install poetry using the following commands (from https://python-poetry.org/docs/#installation):
+```
+curl -sSL https://install.python-poetry.org | python3 -
+PATH=~/.local/bin:$PATH
+```
+
+Within the `tap-workday-raas` directory, install dependencies:
+```
+poetry install
+```
+
+Then run the tap:
+```
+poetry run tap-workday-raas <options>
+```
 ## Create Config
 
    Create your tap's `config.json` file.  The tap config file for this tap should include these entries:
 
    - `username` - The username of the workday account with access to the reports to extract
    - `password` - The password of the workday account with access to the reports to extract
-   - `reports` -  A JSON string containing a list of objects containing the `report_name` and `report_url`. `report_name` is the name of the stream for the report, and the `report_url` is the URL to the Workday XML REST link for the report you wish to extract.
+   - `reports` -  An array containing a list of objects containing the `report_name` and `report_url`. `report_name` is the name of the stream for the report, and the `report_url` is the URL to the Workday XML REST link for the report you wish to extract.
 
    ```json
    {
        "username": "<username>",
        "password": "<password>",
-       "reports": "[{\"report_name\": \"abitrary_name\", \"report_url\": \"https://...\"}, ...]"
+       "reports": [{"report_name": "abitrary_name", "report_url": "https://..."},]
    }
    ```
 
