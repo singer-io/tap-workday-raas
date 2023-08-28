@@ -15,7 +15,8 @@ def _element_to_schema(element):
 
     max_occurs = element.attrib.get("maxOccurs")
     if max_occurs not in (None, "unbounded"):
-        raise Exception("Found unexpected value for maxOccurs attribute: '{}'".format(max_occurs))
+        raise Exception(
+            "Found unexpected value for maxOccurs attribute: '{}'".format(max_occurs))
 
     is_list = max_occurs == "unbounded"
 
@@ -25,7 +26,7 @@ def _element_to_schema(element):
         schema = {"type": ["string"], "format": "date-time"}
     elif elem_type == "decimal":
         # TODO Update to the singer.decimal format when that is available
-        schema = {"type": ["number"],}
+        schema = {"type": ["number"], }
     else:
         schema = {"type": [elem_type]}
 
@@ -47,7 +48,8 @@ def parse_complex_type(complex_type_selectors, xsd_schema_et, ns):
         for element in complex_type.findall(".//xsd:element", ns):
             elem_name = element.attrib["name"]
             schema_type = _element_to_schema(element)
-            complex_type_mapping[name]["properties"][elem_name] = {**schema_type}
+            complex_type_mapping[name]["properties"][elem_name] = {
+                **schema_type}
 
     return complex_type_mapping
 
@@ -60,13 +62,15 @@ def generate_schema_for_report(xsd):
 
     # The report structure is defined by two complexType elements
     report_structure_elem_names = {"Report_EntryType", "Report_DataType"}
-    all_complex_type_names = {e.attrib["name"] for e in xsd_schema_et.findall("./xsd:complexType", ns)}
+    all_complex_type_names = {
+        e.attrib["name"] for e in xsd_schema_et.findall("./xsd:complexType", ns)}
 
     # The set difference results in complexType elements that are used in Report_EntryType to define nested objects
     complex_types = all_complex_type_names - report_structure_elem_names
 
     # Compute JSON Schemas for other complexType elements which will become nested objects
-    complex_type_mapping = parse_complex_type(["./xsd:complexType[@name='{}']".format(i) for i in complex_types],xsd_schema_et,ns,)
+    complex_type_mapping = parse_complex_type(
+        ["./xsd:complexType[@name='{}']".format(i) for i in complex_types], xsd_schema_et, ns,)
 
     # Iterate the 'element' elements nested under the sequence element of the Report definition's complexType
     for elem in xsd_schema_et.findall("./xsd:complexType[@name='Report_EntryType']/xsd:sequence/xsd:element", ns):
@@ -78,12 +82,14 @@ def generate_schema_for_report(xsd):
 
             max_occurs = elem.attrib.get("maxOccurs")
             if max_occurs not in (None, "unbounded"):
-                raise Exception("Found unexpected value for maxOccurs attribute: '{}'".format(max_occurs))
+                raise Exception(
+                    "Found unexpected value for maxOccurs attribute: '{}'".format(max_occurs))
 
             is_list = max_occurs == "unbounded"
 
             if is_list:
-                elem_schema = {"type": "array", "items": complex_type_mapping[elem_type]}
+                elem_schema = {"type": "array",
+                               "items": complex_type_mapping[elem_type]}
             else:
                 elem_schema = complex_type_mapping[elem_type]
             schema["properties"][elem_name] = elem_schema
@@ -103,13 +109,15 @@ def discover_streams(config):
     password = config["password"]
 
     for report in reports:
-        LOGGER.info('Downloading XSD to determine table schema "%s".', report["report_name"])
+        LOGGER.info('Downloading XSD to determine table schema "%s".',
+                    report["report_name"])
 
         xsd = download_xsd(report["report_url"], username, password)
         schema = generate_schema_for_report(xsd)
 
         stream_md = metadata.get_standard_metadata(schema,
-                                                   key_properties=report.get("key_properties"),
+                                                   key_properties=report.get(
+                                                       "key_properties"),
                                                    replication_method="FULL_TABLE")
         streams.append(
             {

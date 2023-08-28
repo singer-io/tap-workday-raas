@@ -1,10 +1,12 @@
 import json
 import sys
 import singer
+import traceback
 
 from singer import metadata
 from singer import utils
 from tap_workday_raas.discover import discover_streams
+from tap_workday_raas.symon_exception import SymonException
 from tap_workday_raas.sync import sync_report
 
 REQUIRED_CONFIG_KEYS = ["username", "password", "reports"]
@@ -38,7 +40,8 @@ def do_sync(config, catalog, state):
         state = singer.set_currently_syncing(state, stream_name)
         singer.write_state(state)
         key_properties = metadata.get(mdata, (), "table-key-properties") or []
-        singer.write_schema(stream_name, stream.schema.to_dict(), key_properties)
+        singer.write_schema(
+            stream_name, stream.schema.to_dict(), key_properties)
 
         LOGGER.info("%s: Starting sync", stream_name)
         counter_value = sync_report(report, stream, config)
@@ -51,12 +54,49 @@ def do_sync(config, catalog, state):
 
 @singer.utils.handle_top_exception(LOGGER)
 def main():
-    args = utils.parse_args(REQUIRED_CONFIG_KEYS)
+    try:
+        # used for storing error info to write if error occurs
+        error_info = None
 
-    if args.discover:
-        do_discover(args.config)
-    elif args.catalog or args.properties:
-        do_sync(args.config, args.catalog, args.state)
+        args = utils.parse_args(REQUIRED_CONFIG_KEYS)
+
+        if args.discover:
+            do_discover(args.config)
+        elif args.catalog or args.properties:
+            do_sync(args.config, args.catalog, args.state)
+    except SymonException as e:
+        error_info = {
+            'message': str(e),
+            'code': e.code,
+            'traceback': traceback.format_exc()
+        }
+
+        if e.details is not None:
+            error_info['details'] = e.details
+        raise
+    except BaseException as e:
+        error_info = {
+            'message': str(e),
+            'traceback': traceback.format_exc()
+        }
+        raise
+    finally:
+        if error_info is not None:
+            error_file_path = args.config.get('error_file_path', None)
+            if error_file_path is not None:
+                try:
+                    with open(error_file_path, 'w', encoding='utf-8') as fp:
+                        json.dump(error_info, fp)
+                except:
+                    pass
+            # log error info as well in case file is corrupted
+            error_info_json = json.dumps(error_info)
+            error_start_marker = args.config.get(
+                'error_start_marker', '[tap_error_start]')
+            error_end_marker = args.config.get(
+                'error_end_marker', '[tap_error_end]')
+            LOGGER.info(
+                f'{error_start_marker}{error_info_json}{error_end_marker}')
 
 
 if __name__ == "__main__":
