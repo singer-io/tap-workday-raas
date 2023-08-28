@@ -76,7 +76,7 @@ def download_xsd(report_url, user, password):
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
         if '500 Server Error: Internal Server Error for url' in str(e):
-            raise SymonException('Invalid report URL',
+            raise SymonException("Sorry, we couldn't access your report. Verify your report URL and try again.",
                                  'workdayRaaS.WorkdayRaaSInvalidReportURL')
         raise
 
