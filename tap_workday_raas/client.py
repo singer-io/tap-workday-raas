@@ -1,6 +1,7 @@
 import requests
 import ijson.backends.yajl2_c as ijson
 import ijson as ijson_core
+from tap_workday_raas.symon_exception import SymonException
 
 
 def stream_report(report_url, user, password):
@@ -13,7 +14,8 @@ def stream_report(report_url, user, password):
     if len(url_breakdown) == 1:
         params = []
     else:
-        params = [x for x in url_breakdown[1].split("&") if not x.startswith("format=")]
+        params = [x for x in url_breakdown[1].split(
+            "&") if not x.startswith("format=")]
 
     # Add the format param
     params.append("format=json")
@@ -24,7 +26,13 @@ def stream_report(report_url, user, password):
 
     # Get the data
     with requests.get(corrected_url, auth=(user, password), stream=True) as resp:
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            if '401 Client Error: Unauthorized for url' in str(e):
+                raise SymonException('Invalid username or password. Please update your connection credentials and try again.',
+                                     'workday.InvalidUsernameOrPassword')
+            raise
 
         # Set up our search key
         report_entry_key = b"Report_Entry"
@@ -51,7 +59,8 @@ def stream_report(report_url, user, password):
             del records[:]
 
         if not found_key:
-            raise Exception("Did not see '{}' key in response. Report does not conform to expected schema, failing.".format(report_entry_key))
+            raise Exception(
+                "Did not see '{}' key in response. Report does not conform to expected schema, failing.".format(report_entry_key))
 
         coro.close()
 
@@ -62,6 +71,13 @@ def download_xsd(report_url, user, password):
     else:
         xsds_url = report_url + "?xsds"
     response = requests.get(xsds_url, auth=(user, password))
-    response.raise_for_status()
+
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if '500 Server Error: Internal Server Error for url' in str(e):
+            raise SymonException("Sorry, we couldn't access your report. Verify your report URL and try again.",
+                                 'workdayRaaS.WorkdayRaaSInvalidReportURL')
+        raise
 
     return response.text
