@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.3
+  * Dependabot update [#15](https://github.com/singer-io/tap-workday-raas/pull/15)
+
 ## 1.0.2
   * Updates ijson version [#13](https://github.com/singer-io/tap-workday-raas/pull/13)
 ## 1.0.1
