@@ -12,7 +12,7 @@ setup(
     install_requires=[
         "singer-python==5.9.0",
         "backoff==1.8.0",
-        "requests==2.31.0",
+        "requests==2.32.0",
         "ijson==3.1.4",
     ],
     extras_require={"dev": ["ipdb", "pylint", "nose"]},
