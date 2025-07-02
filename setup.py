@@ -11,7 +11,7 @@ setup(
     py_modules=["tap_workday_raas"],
     install_requires=[
         "singer-python==5.13.2",
-        "backoff==1.8.0",
+        "backoff==1.10.0",
         "requests==2.32.4",
         "ijson==3.1.4",
     ],
