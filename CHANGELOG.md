@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.4
+  * Bump dependency versions for compliance [#18](https://github.com/singer-io/tap-workday-raas/pull/18)
+
 ## 1.0.3
   * Dependabot update [#15](https://github.com/singer-io/tap-workday-raas/pull/15)
 
