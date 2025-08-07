@@ -2,28 +2,28 @@ version: 2
 jobs:
   build:
     docker:
-      - image: 218546966473.dkr.ecr.us-east-1.amazonaws.com/circle-ci:stitch-tap-tester
+      - image: 218546966473.dkr.ecr.us-east-1.amazonaws.com/circle-ci:stitch-tap-tester-uv
     steps:
-      - checkout     
+      - checkout
       - run:
           name: 'Setup virtual env'
           command: |
-            python3 -mvenv /usr/local/share/virtualenvs/tap-workday-raas
+            uv venv --python 3.9 /usr/local/share/virtualenvs/tap-workday-raas
             source /usr/local/share/virtualenvs/tap-workday-raas/bin/activate
-            pip install -U 'pip<19.2' 'setuptools<51.0.0'
-            pip install .
+            uv pip install -U 'pip<19.2' 'setuptools<51.0.0'
+            uv pip install .
       - run:
           name: 'Pylint'
           command: |
             source /usr/local/share/virtualenvs/tap-workday-raas/bin/activate
-            pip install pylint==2.14.1
+            uv pip install pylint==2.14.1
             pylint tap_workday_raas --disable C,W,R,no-member
       - run:
           name: 'Unit Tests'
           command: |
             source /usr/local/share/virtualenvs/tap-workday-raas/bin/activate
-            pip install nose coverage
-            nosetests --with-coverage --cover-erase --cover-package=tap_workday_raas --cover-html-dir=htmlcov tests/unittests
+            uv pip install pytest coverage
+            coverage run -m pytest tests/unittests
             coverage html
       - store_test_results:
           path: test_output/report.xml
@@ -32,9 +32,10 @@ jobs:
       - run:
           name: 'Integration Tests'
           command: |
+            source /usr/local/share/virtualenvs/tap-tester/bin/activate
+            uv pip install --upgrade awscli
             aws s3 cp s3://com-stitchdata-dev-deployment-assets/environments/tap-tester/tap_tester_sandbox dev_env.sh
             source dev_env.sh
-            source /usr/local/share/virtualenvs/tap-tester/bin/activate
             run-test --tap=tap-workday-raas tests
 workflows:
   version: 2
