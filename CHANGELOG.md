@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.1.0
+  * Updates backoff, ijson, requests and singer-python versions [#21](https://github.com/singer-io/tap-workday-raas/pull/21)
+
 ## 1.0.4
   * Bump dependency versions for compliance [#18](https://github.com/singer-io/tap-workday-raas/pull/18)
 

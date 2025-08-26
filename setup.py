@@ -3,17 +3,17 @@ from setuptools import setup
 
 setup(
     name="tap-workday-raas",
-    version="1.0.4",
+    version="1.1.0",
     description="Singer.io tap for extracting data",
     author="Stitch",
     url="http://singer.io",
     classifiers=["Programming Language :: Python :: 3 :: Only"],
     py_modules=["tap_workday_raas"],
     install_requires=[
-        "singer-python==5.13.2",
-        "backoff==1.10.0",
-        "requests==2.32.4",
-        "ijson==3.1.4",
+        "singer-python==6.1.1",
+        "backoff==2.2.1",
+        "requests==2.32.5",
+        "ijson==3.4.0",
     ],
     extras_require={"dev": ["ipdb", "pylint", "nose"]},
     entry_points="""
