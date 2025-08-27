@@ -13,7 +13,7 @@ setup(
         "singer-python==5.13.2",
         "backoff==1.10.0",
         "requests==2.32.4",
-        "ijson==3.1.4",
+        "ijson==3.4.0",
     ],
     extras_require={"dev": ["ipdb", "pylint", "nose"]},
     entry_points="""
