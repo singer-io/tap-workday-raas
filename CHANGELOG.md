@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.4
+## 1.1.0
   * Bump ijson version for python 3.12 compatibility [#18](https://github.com/singer-io/tap-workday-raas/pull/22)
 
 ## 1.0.4
