@@ -10,7 +10,7 @@ setup(
     classifiers=["Programming Language :: Python :: 3 :: Only"],
     py_modules=["tap_workday_raas"],
     install_requires=[
-        "singer-python==6.1.1",
+        "singer-python==6.3.0",
         "backoff==2.2.1",
         "requests==2.32.5",
         "ijson==3.4.0",
