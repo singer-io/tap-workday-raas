@@ -128,6 +128,9 @@ def enrich_schema_from_data(schema, report_url, username, password, sample_size=
     This function samples actual JSON data and adds any additional columns found
     to the schema, defaulting to their inferred type (or nullable string for None).
     """
+    if sample_size <= 0:
+        return schema
+
     try:
         all_columns = {}  # column_name -> first non-None sample value
         for i, record in enumerate(stream_report(report_url, username, password)):

@@ -1,6 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock, call
-import json
+from unittest.mock import patch, MagicMock
 
 from tap_workday_raas.sync import sync_report, _infer_schema_type
 
@@ -193,8 +192,8 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
     # -----------------------------------------------------------------------
 
     def test_new_column_mid_stream(self, mock_stream_report, mock_singer):
-        """A new column appearing in the second record still triggers schema
-        re-emit, and the first record has that column as null."""
+        """A new column appearing in the second record triggers a schema
+        re-emit. Already-emitted records cannot be backfilled."""
         schema = {
             "type": "object",
             "properties": {

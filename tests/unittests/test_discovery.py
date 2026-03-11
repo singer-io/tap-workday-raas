@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from tap_workday_raas import discover
 
 
@@ -211,15 +211,28 @@ class TestEnrichSchemaFromData(unittest.TestCase):
     @patch("tap_workday_raas.discover.stream_report")
     def test_sample_size_limits_records_read(self, mock_stream):
         """Only sample_size records should be consumed from the stream."""
-        records = [{"col_a": f"v{i}"} for i in range(200)]
-        mock_stream.return_value = iter(records)
+        consumed = []
+        def counting_iter():
+            for i in range(200):
+                consumed.append(i)
+                yield {"col_a": f"v{i}"}
+
+        mock_stream.return_value = counting_iter()
         schema = self._base_schema()
 
         discover.enrich_schema_from_data(schema, "http://fake", "u", "p", sample_size=5)
 
-        # The generator should have been consumed for at most 5 records.
-        # We can verify by checking mock_stream was called (the generator was created).
-        mock_stream.assert_called_once()
+        self.assertEqual(len(consumed), 5, "Should consume exactly sample_size records")
+
+    @patch("tap_workday_raas.discover.stream_report")
+    def test_sample_size_zero_skips_data_fetch(self, mock_stream):
+        """When sample_size is 0, no records should be fetched and schema is unchanged."""
+        schema = self._base_schema()
+        original_props = dict(schema["properties"])
+        result = discover.enrich_schema_from_data(schema, "http://fake", "u", "p", sample_size=0)
+
+        mock_stream.assert_not_called()
+        self.assertEqual(result["properties"], original_props)
 
 
 class TestDiscoverStreamsIncludeAllColumns(unittest.TestCase):
