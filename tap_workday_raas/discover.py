@@ -94,6 +94,44 @@ def generate_schema_for_report(xsd):
     return schema
 
 
+def _collect_flat_properties(properties, flat_props, prefix):
+    """Recursively collect properties, flattening nested objects and arrays of objects."""
+    for key, prop_schema in properties.items():
+        full_key = "{}_{}".format(prefix, key) if prefix else key
+        prop_type = prop_schema.get("type")
+
+        if prop_type == "object" and "properties" in prop_schema:
+            # Nested object – flatten its children into the parent
+            _collect_flat_properties(prop_schema["properties"], flat_props, full_key)
+        elif prop_type == "array" and "items" in prop_schema:
+            items = prop_schema["items"]
+            if items.get("type") == "object" and "properties" in items:
+                # Array of objects – flatten the object's children into the parent
+                _collect_flat_properties(items["properties"], flat_props, full_key)
+            else:
+                # Array of primitives – keep as-is
+                flat_props[full_key] = prop_schema
+        else:
+            flat_props[full_key] = prop_schema
+
+
+def flatten_schema(schema):
+    """Flatten a schema so that nested object / array-of-object properties
+    are promoted to the top level with underscore-joined names.
+
+    A single Workday report should produce a single output dataset.  The XSD
+    often defines complex-type sub-groups that cause targets (e.g. BigQuery)
+    to split the data into parent/child tables.  Flattening the schema
+    prevents that split.
+    """
+    if schema.get("type") != "object" or "properties" not in schema:
+        return schema
+
+    flat_props = {}
+    _collect_flat_properties(schema["properties"], flat_props, prefix="")
+    return {"type": "object", "properties": flat_props}
+
+
 def _infer_schema_from_value(value):
     """Infer JSON schema type from a sample Python value.
 
@@ -177,6 +215,10 @@ def discover_streams(config):
         if include_all_columns:
             LOGGER.info('Enriching schema with columns from data for "%s".', report["report_name"])
             schema = enrich_schema_from_data(schema, report["report_url"], username, password)
+
+        # Flatten nested objects / arrays-of-objects so a single Workday
+        # report always produces a single output dataset (no parent/child split).
+        schema = flatten_schema(schema)
 
         stream_md = metadata.get_standard_metadata(schema,
                                                    key_properties=report.get("key_properties"),

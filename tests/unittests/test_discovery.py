@@ -282,3 +282,162 @@ class TestDiscoverStreamsIncludeAllColumns(unittest.TestCase):
         }
         discover.discover_streams(config)
         mock_enrich.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests for flatten_schema
+# ---------------------------------------------------------------------------
+
+class TestFlattenSchema(unittest.TestCase):
+    """Verify that flatten_schema promotes nested object/array-of-object
+    properties to the top level, preventing parent/child splitting."""
+
+    def test_already_flat_schema_unchanged(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "col_a": {"type": ["string", "null"]},
+                "col_b": {"type": ["number", "null"]},
+            }
+        }
+        result = discover.flatten_schema(schema)
+        self.assertEqual(result, schema)
+
+    def test_nested_object_flattened(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "col_a": {"type": ["string", "null"]},
+                "group": {
+                    "type": "object",
+                    "properties": {
+                        "child1": {"type": ["string", "null"]},
+                        "child2": {"type": ["number", "null"]},
+                    }
+                },
+            }
+        }
+        result = discover.flatten_schema(schema)
+        self.assertNotIn("group", result["properties"])
+        self.assertEqual(result["properties"]["col_a"], {"type": ["string", "null"]})
+        self.assertEqual(result["properties"]["group_child1"], {"type": ["string", "null"]})
+        self.assertEqual(result["properties"]["group_child2"], {"type": ["number", "null"]})
+
+    def test_array_of_objects_flattened(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "col_a": {"type": ["string", "null"]},
+                "group": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "child1": {"type": ["string", "null"]},
+                            "child2": {"type": ["number", "null"]},
+                        }
+                    }
+                },
+            }
+        }
+        result = discover.flatten_schema(schema)
+        self.assertNotIn("group", result["properties"])
+        self.assertEqual(result["properties"]["group_child1"], {"type": ["string", "null"]})
+        self.assertEqual(result["properties"]["group_child2"], {"type": ["number", "null"]})
+
+    def test_array_of_primitives_kept(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "items": {"type": ["string", "null"]}},
+            }
+        }
+        result = discover.flatten_schema(schema)
+        self.assertEqual(result["properties"]["tags"],
+                         {"type": "array", "items": {"type": ["string", "null"]}})
+
+    def test_deeply_nested_flattened(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "level1": {
+                    "type": "object",
+                    "properties": {
+                        "level2": {
+                            "type": "object",
+                            "properties": {
+                                "value": {"type": ["string", "null"]},
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        result = discover.flatten_schema(schema)
+        self.assertEqual(list(result["properties"].keys()), ["level1_level2_value"])
+        self.assertEqual(result["properties"]["level1_level2_value"],
+                         {"type": ["string", "null"]})
+
+    def test_xsd_schema_flattened(self):
+        """The test XSD's Candidate_Details_group array should be flattened."""
+        nested_schema = discover.generate_schema_for_report(xsd)
+        result = discover.flatten_schema(nested_schema)
+
+        # The nested array property should be gone
+        self.assertNotIn("Candidate_Details_group", result["properties"])
+
+        # Its child properties should be promoted
+        self.assertIn("Candidate_Details_group_Employee", result["properties"])
+        self.assertIn("Candidate_Details_group_Willing_To_Travel", result["properties"])
+        self.assertIn("Candidate_Details_group_Potential", result["properties"])
+
+        # Top-level properties should still be present
+        self.assertIn("Default_Job_Title", result["properties"])
+        self.assertIn("Average_Pay_-_Amount", result["properties"])
+        self.assertIn("job_profile_id", result["properties"])
+        self.assertIn("Languages", result["properties"])
+        self.assertIn("Default_Assessment_Tests", result["properties"])
+        self.assertIn("Business_Unit_or_Business_Unit_Hierarchy_Container",
+                       result["properties"])
+
+        # Total: 6 top-level + 3 promoted = 9
+        self.assertEqual(len(result["properties"]), 9)
+
+    def test_non_object_schema_returned_as_is(self):
+        schema = {"type": "string"}
+        self.assertEqual(discover.flatten_schema(schema), schema)
+
+    def test_schema_without_properties_returned_as_is(self):
+        schema = {"type": "object"}
+        self.assertEqual(discover.flatten_schema(schema), schema)
+
+
+class TestDiscoverStreamsProducesFlatSchema(unittest.TestCase):
+    """Verify that discover_streams returns a flat schema (no nesting)."""
+
+    @patch("tap_workday_raas.discover.enrich_schema_from_data")
+    @patch("tap_workday_raas.discover.download_xsd")
+    def test_discover_streams_returns_flat_schema(self, mock_xsd, mock_enrich):
+        mock_xsd.return_value = xsd
+        mock_enrich.side_effect = lambda schema, *a, **kw: schema
+
+        config = {
+            "username": "user",
+            "password": "pass",
+            "reports": '[{"report_url": "http://fake", "report_name": "test_report"}]',
+        }
+        streams = discover.discover_streams(config)
+        schema = streams[0]["schema"]
+
+        # Should be flat – no nested object or array-of-object properties
+        for prop_name, prop_schema in schema["properties"].items():
+            prop_type = prop_schema.get("type")
+            if prop_type == "object":
+                self.fail("Property '{}' is a nested object; schema should be flat".format(prop_name))
+            if prop_type == "array" and prop_schema.get("items", {}).get("type") == "object":
+                self.fail("Property '{}' is an array of objects; schema should be flat".format(prop_name))
+
+        # The Candidate_Details_group children should be promoted
+        self.assertIn("Candidate_Details_group_Employee", schema["properties"])
+        self.assertIn("Candidate_Details_group_Willing_To_Travel", schema["properties"])
+        self.assertIn("Candidate_Details_group_Potential", schema["properties"])

@@ -1,7 +1,73 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
-from tap_workday_raas.sync import sync_report, _infer_schema_type
+from tap_workday_raas.sync import sync_report, _infer_schema_type, flatten_record
+
+
+# ---------------------------------------------------------------------------
+# Tests for flatten_record
+# ---------------------------------------------------------------------------
+
+class TestFlattenRecord(unittest.TestCase):
+    """Verify that flatten_record converts nested dicts / lists-of-dicts
+    into a single flat dict with underscore-joined keys."""
+
+    def test_already_flat_record_unchanged(self):
+        record = {"a": 1, "b": "hello"}
+        self.assertEqual(flatten_record(record), record)
+
+    def test_nested_dict_flattened(self):
+        record = {"a": 1, "group": {"child1": "x", "child2": 2}}
+        result = flatten_record(record)
+        self.assertEqual(result, {"a": 1, "group_child1": "x", "group_child2": 2})
+
+    def test_list_of_single_dict_flattened(self):
+        record = {"a": 1, "group": [{"child1": "x", "child2": 2}]}
+        result = flatten_record(record)
+        self.assertEqual(result, {"a": 1, "group_child1": "x", "group_child2": 2})
+
+    def test_list_of_multiple_dicts_flattened(self):
+        """Multiple array items are flattened; later values overwrite earlier ones."""
+        record = {"a": 1, "group": [{"child": "first"}, {"child": "second"}]}
+        result = flatten_record(record)
+        self.assertEqual(result, {"a": 1, "group_child": "second"})
+
+    def test_empty_list_skipped(self):
+        record = {"a": 1, "group": []}
+        result = flatten_record(record)
+        self.assertEqual(result, {"a": 1})
+
+    def test_list_of_primitives_kept(self):
+        record = {"a": 1, "tags": ["x", "y"]}
+        result = flatten_record(record)
+        self.assertEqual(result, {"a": 1, "tags": ["x", "y"]})
+
+    def test_deeply_nested(self):
+        record = {"outer": {"mid": {"inner": "val"}}}
+        result = flatten_record(record)
+        self.assertEqual(result, {"outer_mid_inner": "val"})
+
+    def test_none_values_preserved(self):
+        record = {"a": None, "group": {"child": None}}
+        result = flatten_record(record)
+        self.assertEqual(result, {"a": None, "group_child": None})
+
+    def test_workday_style_record(self):
+        """Simulate a typical Workday record with a sub-group array."""
+        record = {
+            "Employee_ID": "123",
+            "Name": "John",
+            "Compensation_group": [
+                {"Pay_Rate": 50000, "Currency": "USD"}
+            ]
+        }
+        result = flatten_record(record)
+        self.assertEqual(result, {
+            "Employee_ID": "123",
+            "Name": "John",
+            "Compensation_group_Pay_Rate": 50000,
+            "Compensation_group_Currency": "USD",
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -337,3 +403,110 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
             emitted_schema["properties"]["new_null"],
             {"type": ["string", "null"]}
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests for sync_report – nested record flattening
+# ---------------------------------------------------------------------------
+
+@patch("tap_workday_raas.sync.singer")
+@patch("tap_workday_raas.sync.stream_report")
+class TestSyncReportFlattensNestedRecords(unittest.TestCase):
+    """Ensure sync_report flattens nested dicts/arrays in records so that
+    a single Workday report always produces a single flat output dataset."""
+
+    def _default_config(self):
+        return {"username": "u", "password": "p"}
+
+    def _default_report(self):
+        return {"report_url": "http://fake", "report_name": "test_report"}
+
+    def test_nested_dict_flattened_in_output(self, mock_stream_report, mock_singer):
+        """A nested dict in a record should appear as flattened columns."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "col_a": {"type": ["string", "null"]},
+                "group_child1": {"type": ["string", "null"]},
+                "group_child2": {"type": ["number", "null"]},
+            }
+        }
+        stream = _make_stream("test", schema)
+        mock_stream_report.return_value = iter([
+            {"col_a": "v1", "group": {"child1": "x", "child2": 2}},
+        ])
+
+        sync_report(self._default_report(), stream, self._default_config())
+
+        rm_calls = mock_singer.RecordMessage.call_args_list
+        self.assertEqual(len(rm_calls), 1)
+        record = rm_calls[0][0][1]
+        self.assertEqual(record["col_a"], "v1")
+        self.assertEqual(record["group_child1"], "x")
+        self.assertEqual(record["group_child2"], 2)
+        # The nested key should NOT appear
+        self.assertNotIn("group", record)
+
+    def test_array_of_single_object_flattened(self, mock_stream_report, mock_singer):
+        """A list containing one dict should be flattened like a plain dict."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "col_a": {"type": ["string", "null"]},
+                "group_child1": {"type": ["string", "null"]},
+            }
+        }
+        stream = _make_stream("test", schema)
+        mock_stream_report.return_value = iter([
+            {"col_a": "v1", "group": [{"child1": "x"}]},
+        ])
+
+        sync_report(self._default_report(), stream, self._default_config())
+
+        rm_calls = mock_singer.RecordMessage.call_args_list
+        record = rm_calls[0][0][1]
+        self.assertEqual(record["group_child1"], "x")
+
+    def test_row_count_matches_source(self, mock_stream_report, mock_singer):
+        """Flattening should not create extra rows – one input record = one output record."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "id": {"type": ["string", "null"]},
+                "grp_val": {"type": ["string", "null"]},
+            }
+        }
+        stream = _make_stream("test", schema)
+        mock_stream_report.return_value = iter([
+            {"id": "1", "grp": [{"val": "a"}]},
+            {"id": "2", "grp": [{"val": "b"}]},
+            {"id": "3", "grp": [{"val": "c"}]},
+        ])
+
+        count = sync_report(self._default_report(), stream, self._default_config())
+        self.assertEqual(count, 3)
+        self.assertEqual(len(mock_singer.RecordMessage.call_args_list), 3)
+
+    def test_missing_nested_group_filled_with_null(self, mock_stream_report, mock_singer):
+        """When a record is missing a nested group, its flattened columns
+        should be filled with None."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "col_a": {"type": ["string", "null"]},
+                "group_child1": {"type": ["string", "null"]},
+            }
+        }
+        stream = _make_stream("test", schema)
+        # This record has no "group" at all
+        mock_stream_report.return_value = iter([
+            {"col_a": "v1"},
+        ])
+
+        sync_report(self._default_report(), stream, self._default_config())
+
+        rm_calls = mock_singer.RecordMessage.call_args_list
+        record = rm_calls[0][0][1]
+        self.assertEqual(record["col_a"], "v1")
+        # group_child1 should be None (null-filled)
+        self.assertIsNone(record["group_child1"])
