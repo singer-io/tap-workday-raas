@@ -4,7 +4,7 @@ import singer
 
 from singer import metadata
 
-from tap_workday_raas.client import download_xsd
+from tap_workday_raas.client import download_xsd, stream_report
 
 LOGGER = singer.get_logger()
 
@@ -94,6 +94,68 @@ def generate_schema_for_report(xsd):
     return schema
 
 
+def _infer_schema_from_value(value):
+    """Infer JSON schema type from a sample Python value.
+
+    Used when a column is found in the data but not in the XSD schema.
+    Defaults to nullable string for None values.
+    """
+    if value is None:
+        return {"type": ["string", "null"]}
+    elif isinstance(value, bool):
+        return {"type": ["boolean", "null"]}
+    elif isinstance(value, (int, float)):
+        return {"type": ["number", "null"]}
+    elif isinstance(value, dict):
+        properties = {}
+        for k, v in value.items():
+            properties[k] = _infer_schema_from_value(v)
+        return {"type": "object", "properties": properties}
+    elif isinstance(value, list):
+        if value:
+            items_schema = _infer_schema_from_value(value[0])
+        else:
+            items_schema = {"type": ["string", "null"]}
+        return {"type": "array", "items": items_schema}
+    else:
+        return {"type": ["string", "null"]}
+
+
+def enrich_schema_from_data(schema, report_url, username, password, sample_size=100):
+    """Enrich schema with column definitions found in actual report data but missing from XSD.
+
+    Workday's XSD endpoint may omit columns where all rows contain null values.
+    This function samples actual JSON data and adds any additional columns found
+    to the schema, defaulting to their inferred type (or nullable string for None).
+    """
+    try:
+        all_columns = {}  # column_name -> first non-None sample value
+        for i, record in enumerate(stream_report(report_url, username, password)):
+            for key, value in record.items():
+                if key not in all_columns or all_columns[key] is None:
+                    all_columns[key] = value
+            if i >= sample_size - 1:
+                break
+
+        for col, sample_value in all_columns.items():
+            if col not in schema["properties"]:
+                inferred_schema = _infer_schema_from_value(sample_value)
+                LOGGER.info(
+                    'Found column "%s" in data not in XSD schema. '
+                    'Adding with inferred type: %s',
+                    col, inferred_schema
+                )
+                schema["properties"][col] = inferred_schema
+    except Exception as e:
+        LOGGER.warning(
+            "Could not enrich schema from data sampling: %s. "
+            "Continuing with schema from XSD only.",
+            str(e)
+        )
+
+    return schema
+
+
 def discover_streams(config):
     streams = []
 
@@ -101,12 +163,17 @@ def discover_streams(config):
 
     username = config["username"]
     password = config["password"]
+    include_all_columns = config.get("include_all_columns", True)
 
     for report in reports:
         LOGGER.info('Downloading XSD to determine table schema "%s".', report["report_name"])
 
         xsd = download_xsd(report["report_url"], username, password)
         schema = generate_schema_for_report(xsd)
+
+        if include_all_columns:
+            LOGGER.info('Enriching schema with columns from data for "%s".', report["report_name"])
+            schema = enrich_schema_from_data(schema, report["report_url"], username, password)
 
         stream_md = metadata.get_standard_metadata(schema,
                                                    key_properties=report.get("key_properties"),
