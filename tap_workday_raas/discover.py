@@ -33,7 +33,10 @@ def _element_to_schema(element):
         schema["type"].append("null")
 
     if is_list:
-        schema = {"type": "array", "items": schema}
+        if is_nullable:
+            schema = {"type": ["array", "null"], "items": schema}
+        else:
+            schema = {"type": "array", "items": schema}
 
     return schema
 
@@ -81,9 +84,13 @@ def generate_schema_for_report(xsd):
                 raise Exception("Found unexpected value for maxOccurs attribute: '{}'".format(max_occurs))
 
             is_list = max_occurs == "unbounded"
+            is_nullable = elem.attrib.get("minOccurs") == "0"
 
             if is_list:
-                elem_schema = {"type": "array", "items": complex_type_mapping[elem_type]}
+                if is_nullable:
+                    elem_schema = {"type": ["array", "null"], "items": complex_type_mapping[elem_type]}
+                else:
+                    elem_schema = {"type": "array", "items": complex_type_mapping[elem_type]}
             else:
                 elem_schema = complex_type_mapping[elem_type]
             schema["properties"][elem_name] = elem_schema

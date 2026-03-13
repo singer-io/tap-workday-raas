@@ -49,7 +49,7 @@ class DiscoveryTest(unittest.TestCase):
                                                                  'Potential': {'type': ['string', 'null']},
                                                                  'Willing_To_Travel': {'type': ['string', 'null']}},
                                                   'type': 'object'},
-                                                 'type': 'array'},
+                                                 'type': ['array', 'null']},
                      'Default_Assessment_Tests': {'type': ['string', 'null']},
                      'Default_Job_Title': {'type': ['string', 'null']},
                      'Languages': {'type': ['string', 'null']},
@@ -57,7 +57,6 @@ class DiscoveryTest(unittest.TestCase):
                     'type': 'object'}
 
         actual = discover.generate_schema_for_report(xsd)
-        
         self.assertEqual(expected, actual)
 
 
