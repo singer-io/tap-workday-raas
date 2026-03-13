@@ -5,6 +5,7 @@ import singer
 from singer import metadata
 
 from tap_workday_raas.client import download_xsd, stream_report
+from tap_workday_raas.schema_utils import infer_schema_from_value
 
 LOGGER = singer.get_logger()
 
@@ -101,33 +102,6 @@ def generate_schema_for_report(xsd):
     return schema
 
 
-def _infer_schema_from_value(value):
-    """Infer JSON schema type from a sample Python value.
-
-    Used when a column is found in the data but not in the XSD schema.
-    Defaults to nullable string for None values.
-    """
-    if value is None:
-        return {"type": ["string", "null"]}
-    elif isinstance(value, bool):
-        return {"type": ["boolean", "null"]}
-    elif isinstance(value, (int, float)):
-        return {"type": ["number", "null"]}
-    elif isinstance(value, dict):
-        properties = {}
-        for k, v in value.items():
-            properties[k] = _infer_schema_from_value(v)
-        return {"type": "object", "properties": properties}
-    elif isinstance(value, list):
-        if value:
-            items_schema = _infer_schema_from_value(value[0])
-        else:
-            items_schema = {"type": ["string", "null"]}
-        return {"type": "array", "items": items_schema}
-    else:
-        return {"type": ["string", "null"]}
-
-
 def enrich_schema_from_data(schema, report_url, username, password, sample_size=100):
     """Enrich schema with column definitions found in actual report data but missing from XSD.
 
@@ -149,7 +123,7 @@ def enrich_schema_from_data(schema, report_url, username, password, sample_size=
 
         for col, sample_value in all_columns.items():
             if col not in schema["properties"]:
-                inferred_schema = _infer_schema_from_value(sample_value)
+                inferred_schema = infer_schema_from_value(sample_value)
                 LOGGER.info(
                     'Found column "%s" in data not in XSD schema. '
                     'Adding with inferred type: %s',

@@ -61,30 +61,30 @@ class DiscoveryTest(unittest.TestCase):
 
 
 class TestInferSchemaFromValue(unittest.TestCase):
-    """Test _infer_schema_from_value type inference for various Python values."""
+    """Test infer_schema_from_value type inference for various Python values."""
 
     def test_none_returns_nullable_string(self):
-        result = discover._infer_schema_from_value(None)
+        result = discover.infer_schema_from_value(None)
         self.assertEqual(result, {"type": ["string", "null"]})
 
     def test_string_returns_nullable_string(self):
-        result = discover._infer_schema_from_value("hello")
+        result = discover.infer_schema_from_value("hello")
         self.assertEqual(result, {"type": ["string", "null"]})
 
     def test_bool_returns_nullable_boolean(self):
-        result = discover._infer_schema_from_value(True)
+        result = discover.infer_schema_from_value(True)
         self.assertEqual(result, {"type": ["boolean", "null"]})
 
     def test_int_returns_nullable_number(self):
-        result = discover._infer_schema_from_value(42)
+        result = discover.infer_schema_from_value(42)
         self.assertEqual(result, {"type": ["number", "null"]})
 
     def test_float_returns_nullable_number(self):
-        result = discover._infer_schema_from_value(3.14)
+        result = discover.infer_schema_from_value(3.14)
         self.assertEqual(result, {"type": ["number", "null"]})
 
     def test_dict_returns_object_with_properties(self):
-        result = discover._infer_schema_from_value({"name": "Alice", "age": 30})
+        result = discover.infer_schema_from_value({"name": "Alice", "age": 30})
         self.assertEqual(result, {
             "type": "object",
             "properties": {
@@ -94,14 +94,14 @@ class TestInferSchemaFromValue(unittest.TestCase):
         })
 
     def test_list_returns_array_with_item_type(self):
-        result = discover._infer_schema_from_value(["a", "b"])
+        result = discover.infer_schema_from_value(["a", "b"])
         self.assertEqual(result, {
             "type": "array",
             "items": {"type": ["string", "null"]}
         })
 
     def test_empty_list_returns_array_with_nullable_string_items(self):
-        result = discover._infer_schema_from_value([])
+        result = discover.infer_schema_from_value([])
         self.assertEqual(result, {
             "type": "array",
             "items": {"type": ["string", "null"]}
