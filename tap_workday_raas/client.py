@@ -49,8 +49,8 @@ def stream_report(report_url, user, password):
         # (raw byte scanning of small chunks could miss it).
         key_events = ijson_core.sendable_list()
         key_coro = ijson.parse_coro(key_events)
-        found_report_data = False
         found_report_entry = False
+        response_is_json_object = False
 
         for chunk in resp.iter_content(chunk_size=512):
             coro.send(chunk)
@@ -58,9 +58,9 @@ def stream_report(report_url, user, password):
 
             # Scan parser events returned so far for the keys we care about
             for prefix, event, _value in key_events:
-                if prefix == "" and event == "map_key" and _value == "Report_Data":
-                    found_report_data = True
-                elif prefix == "Report_Data" and event == "map_key" and _value == report_entry_key.decode("utf-8"):
+                if prefix == "" and event == "start_map":
+                    response_is_json_object = True
+                elif prefix == "" and event == "map_key" and _value == report_entry_key.decode("utf-8"):
                     found_report_entry = True
             del key_events[:]
 
@@ -69,8 +69,8 @@ def stream_report(report_url, user, password):
             del records[:]
 
         if not found_report_entry:
-            if found_report_data:
-                # Known empty-response shape: {"Report_Data": {}} with no
+            if response_is_json_object:
+                # The response is valid JSON but does not contain the
                 # Report_Entry key.  This is the standard Workday zero-row
                 # response – log a warning and continue.
                 LOGGER.warning(
@@ -79,10 +79,10 @@ def stream_report(report_url, user, password):
                     report_entry_key.decode("utf-8"),
                 )
             else:
-                # Unexpected payload – neither Report_Data nor Report_Entry
-                # found.  This likely indicates a schema change or API error.
+                # Unexpected payload – the response is not even a JSON
+                # object.  This likely indicates an API error.
                 raise Exception(
-                    "Did not see 'Report_Data' or '{}' key in response. "
+                    "Did not see '{}' key in response. "
                     "Report does not conform to expected schema, failing."
                     .format(report_entry_key.decode("utf-8"))
                 )

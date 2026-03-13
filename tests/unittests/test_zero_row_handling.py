@@ -101,13 +101,13 @@ def _make_stream(tap_stream_id, schema, metadata_list=None):
 
 class TestStreamReportZeroRows(unittest.TestCase):
     """Verify that stream_report completes without error when the
-    Workday API returns a response with no Report_Entry key
-    (the standard zero-row response: {"Report_Data": {}})."""
+    Workday API returns a JSON response with no Report_Entry key
+    (the standard zero-row response is a JSON object without that key)."""
 
     @patch("tap_workday_raas.client.requests.get")
-    def test_empty_report_data_no_report_entry_key(self, mock_get):
-        """Workday returns {"Report_Data": {}} → 0 records, no exception."""
-        body = json.dumps({"Report_Data": {}}).encode("utf-8")
+    def test_empty_json_object_no_report_entry_key(self, mock_get):
+        """Workday returns an empty JSON object → 0 records, no exception."""
+        body = json.dumps({}).encode("utf-8")
         mock_resp = MagicMock()
         mock_resp.iter_content.return_value = [body]
         mock_resp.raise_for_status = MagicMock()
@@ -120,8 +120,8 @@ class TestStreamReportZeroRows(unittest.TestCase):
 
     @patch("tap_workday_raas.client.requests.get")
     def test_report_entry_present_but_empty_array(self, mock_get):
-        """Workday returns {"Report_Data": {"Report_Entry": []}} → 0 records."""
-        body = json.dumps({"Report_Data": {"Report_Entry": []}}).encode("utf-8")
+        """Workday returns {"Report_Entry": []} → 0 records."""
+        body = json.dumps({"Report_Entry": []}).encode("utf-8")
         mock_resp = MagicMock()
         mock_resp.iter_content.return_value = [body]
         mock_resp.raise_for_status = MagicMock()
@@ -138,11 +138,9 @@ class TestStreamReportZeroRows(unittest.TestCase):
         passes (no warning logged). We verify by checking that the warning
         about missing Report_Entry is NOT emitted."""
         body = json.dumps({
-            "Report_Data": {
-                "Report_Entry": [
-                    {"Employee_ID": "E001", "Name": "Alice"},
-                ]
-            }
+            "Report_Entry": [
+                {"Employee_ID": "E001", "Name": "Alice"},
+            ]
         }).encode("utf-8")
         mock_resp = MagicMock()
         # Use a single chunk large enough for the key detection
@@ -162,7 +160,7 @@ class TestStreamReportZeroRows(unittest.TestCase):
     @patch("tap_workday_raas.client.requests.get")
     def test_empty_report_logs_warning(self, mock_get, mock_logger):
         """When Report_Entry is missing, a warning is logged (not an error)."""
-        body = json.dumps({"Report_Data": {}}).encode("utf-8")
+        body = json.dumps({}).encode("utf-8")
         mock_resp = MagicMock()
         mock_resp.iter_content.return_value = [body]
         mock_resp.raise_for_status = MagicMock()
@@ -182,10 +180,10 @@ class TestStreamReportZeroRows(unittest.TestCase):
         self.assertIn("0 rows", full_message)
 
     @patch("tap_workday_raas.client.requests.get")
-    def test_unexpected_payload_raises_exception(self, mock_get):
-        """When the response has neither Report_Data nor Report_Entry
-        (unexpected schema change), an exception should be raised."""
-        body = json.dumps({"Unexpected_Key": {}}).encode("utf-8")
+    def test_non_json_object_response_raises_exception(self, mock_get):
+        """When the response is not a valid JSON object (e.g. a bare
+        string or array), an exception should be raised."""
+        body = b'"not a json object"'
         mock_resp = MagicMock()
         mock_resp.iter_content.return_value = [body]
         mock_resp.raise_for_status = MagicMock()
@@ -195,8 +193,23 @@ class TestStreamReportZeroRows(unittest.TestCase):
 
         with self.assertRaises(Exception) as ctx:
             list(stream_report("http://fake", "u", "p"))
-        self.assertIn("Report_Data", str(ctx.exception))
         self.assertIn("Report_Entry", str(ctx.exception))
+
+    @patch("tap_workday_raas.client.requests.get")
+    def test_json_object_without_report_entry_warns_not_raises(self, mock_get):
+        """When the response is a valid JSON object but has different keys
+        (no Report_Entry), treat as zero-row — warn, do not raise."""
+        body = json.dumps({"Some_Other_Key": "value"}).encode("utf-8")
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [body]
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_get.return_value = mock_resp
+
+        # Should NOT raise — valid JSON object, just no Report_Entry
+        records = list(stream_report("http://fake", "u", "p"))
+        self.assertEqual(records, [])
 
     @patch("tap_workday_raas.client.requests.get")
     def test_report_entry_key_split_across_chunks(self, mock_get):
@@ -205,11 +218,9 @@ class TestStreamReportZeroRows(unittest.TestCase):
         'missing key' warning).  The old raw-byte-scan approach would
         have missed the key when it straddled two chunks."""
         body = json.dumps({
-            "Report_Data": {
-                "Report_Entry": [
-                    {"Employee_ID": "E001"}
-                ]
-            }
+            "Report_Entry": [
+                {"Employee_ID": "E001"}
+            ]
         }).encode("utf-8")
         # Split the body so that "Report_Entry" is spread across two
         # chunks – the first chunk ends in the middle of the key.
