@@ -147,7 +147,6 @@ def discover_streams(config):
 
     username = config["username"]
     password = config["password"]
-    include_all_columns = config.get("include_all_columns", True)
 
     for report in reports:
         LOGGER.info('Downloading XSD to determine table schema "%s".', report["report_name"])
@@ -155,9 +154,8 @@ def discover_streams(config):
         xsd = download_xsd(report["report_url"], username, password)
         schema = generate_schema_for_report(xsd)
 
-        if include_all_columns:
-            LOGGER.info('Enriching schema with columns from data for "%s".', report["report_name"])
-            schema = enrich_schema_from_data(schema, report["report_url"], username, password)
+        LOGGER.info('Enriching schema with columns from data for "%s".', report["report_name"])
+        schema = enrich_schema_from_data(schema, report["report_url"], username, password)
 
         stream_md = metadata.get_standard_metadata(schema,
                                                    key_properties=report.get("key_properties"),

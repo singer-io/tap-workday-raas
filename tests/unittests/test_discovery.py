@@ -234,43 +234,13 @@ class TestEnrichSchemaFromData(unittest.TestCase):
         self.assertEqual(result["properties"], original_props)
 
 
-class TestDiscoverStreamsIncludeAllColumns(unittest.TestCase):
-    """Test discover_streams with include_all_columns config."""
+class TestDiscoverStreamsEnrichment(unittest.TestCase):
+    """Test discover_streams always enriches schema from data."""
 
     @patch("tap_workday_raas.discover.enrich_schema_from_data")
     @patch("tap_workday_raas.discover.download_xsd")
-    def test_include_all_columns_true_calls_enrich(self, mock_xsd, mock_enrich):
-        """When include_all_columns is True, enrich_schema_from_data is called."""
-        mock_xsd.return_value = xsd
-        mock_enrich.side_effect = lambda schema, *a, **kw: schema
-
-        config = {
-            "username": "user",
-            "password": "pass",
-            "reports": '[{"report_url": "http://fake", "report_name": "test_report"}]',
-            "include_all_columns": True,
-        }
-        discover.discover_streams(config)
-        mock_enrich.assert_called_once()
-
-    @patch("tap_workday_raas.discover.enrich_schema_from_data")
-    @patch("tap_workday_raas.discover.download_xsd")
-    def test_include_all_columns_false_skips_enrich(self, mock_xsd, mock_enrich):
-        """When include_all_columns is False, enrich_schema_from_data is NOT called."""
-        mock_xsd.return_value = xsd
-        config = {
-            "username": "user",
-            "password": "pass",
-            "reports": '[{"report_url": "http://fake", "report_name": "test_report"}]',
-            "include_all_columns": False,
-        }
-        discover.discover_streams(config)
-        mock_enrich.assert_not_called()
-
-    @patch("tap_workday_raas.discover.enrich_schema_from_data")
-    @patch("tap_workday_raas.discover.download_xsd")
-    def test_include_all_columns_defaults_to_true(self, mock_xsd, mock_enrich):
-        """When include_all_columns is not in config, it defaults to True."""
+    def test_enrich_schema_always_called(self, mock_xsd, mock_enrich):
+        """enrich_schema_from_data is always called during discovery."""
         mock_xsd.return_value = xsd
         mock_enrich.side_effect = lambda schema, *a, **kw: schema
 
