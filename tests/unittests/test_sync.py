@@ -1,7 +1,8 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
-from tap_workday_raas.sync import sync_report, _infer_schema_type, flatten_record
+from tap_workday_raas.sync import sync_report, flatten_record
+from tap_workday_raas.schema_utils import infer_schema_from_value
 
 
 # ---------------------------------------------------------------------------
@@ -71,44 +72,44 @@ class TestFlattenRecord(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Tests for _infer_schema_type
+# Tests for infer_schema_from_value
 # ---------------------------------------------------------------------------
 
 class TestInferSchemaType(unittest.TestCase):
     """Verify type inference used when expanding the schema during sync."""
 
     def test_none_returns_nullable_string(self):
-        self.assertEqual(_infer_schema_type(None), {"type": ["string", "null"]})
+        self.assertEqual(infer_schema_from_value(None), {"type": ["string", "null"]})
 
     def test_string_returns_nullable_string(self):
-        self.assertEqual(_infer_schema_type("hello"), {"type": ["string", "null"]})
+        self.assertEqual(infer_schema_from_value("hello"), {"type": ["string", "null"]})
 
     def test_bool_returns_nullable_boolean(self):
-        self.assertEqual(_infer_schema_type(True), {"type": ["boolean", "null"]})
-        self.assertEqual(_infer_schema_type(False), {"type": ["boolean", "null"]})
+        self.assertEqual(infer_schema_from_value(True), {"type": ["boolean", "null"]})
+        self.assertEqual(infer_schema_from_value(False), {"type": ["boolean", "null"]})
 
     def test_int_returns_nullable_number(self):
-        self.assertEqual(_infer_schema_type(42), {"type": ["number", "null"]})
+        self.assertEqual(infer_schema_from_value(42), {"type": ["number", "null"]})
 
     def test_float_returns_nullable_number(self):
-        self.assertEqual(_infer_schema_type(3.14), {"type": ["number", "null"]})
+        self.assertEqual(infer_schema_from_value(3.14), {"type": ["number", "null"]})
 
     def test_dict_returns_object(self):
-        result = _infer_schema_type({"k": "v"})
+        result = infer_schema_from_value({"k": "v"})
         self.assertEqual(result, {
             "type": "object",
             "properties": {"k": {"type": ["string", "null"]}}
         })
 
     def test_list_with_values_returns_array(self):
-        result = _infer_schema_type(["a"])
+        result = infer_schema_from_value(["a"])
         self.assertEqual(result, {
             "type": "array",
             "items": {"type": ["string", "null"]}
         })
 
     def test_empty_list_returns_array_with_nullable_string_items(self):
-        result = _infer_schema_type([])
+        result = infer_schema_from_value([])
         self.assertEqual(result, {
             "type": "array",
             "items": {"type": ["string", "null"]}

@@ -49,7 +49,7 @@ class DiscoveryTest(unittest.TestCase):
                                                                  'Potential': {'type': ['string', 'null']},
                                                                  'Willing_To_Travel': {'type': ['string', 'null']}},
                                                   'type': 'object'},
-                                                 'type': 'array'},
+                                                 'type': ['array', 'null']},
                      'Default_Assessment_Tests': {'type': ['string', 'null']},
                      'Default_Job_Title': {'type': ['string', 'null']},
                      'Languages': {'type': ['string', 'null']},
@@ -57,35 +57,34 @@ class DiscoveryTest(unittest.TestCase):
                     'type': 'object'}
 
         actual = discover.generate_schema_for_report(xsd)
-        
         self.assertEqual(expected, actual)
 
 
 class TestInferSchemaFromValue(unittest.TestCase):
-    """Test _infer_schema_from_value type inference for various Python values."""
+    """Test infer_schema_from_value type inference for various Python values."""
 
     def test_none_returns_nullable_string(self):
-        result = discover._infer_schema_from_value(None)
+        result = discover.infer_schema_from_value(None)
         self.assertEqual(result, {"type": ["string", "null"]})
 
     def test_string_returns_nullable_string(self):
-        result = discover._infer_schema_from_value("hello")
+        result = discover.infer_schema_from_value("hello")
         self.assertEqual(result, {"type": ["string", "null"]})
 
     def test_bool_returns_nullable_boolean(self):
-        result = discover._infer_schema_from_value(True)
+        result = discover.infer_schema_from_value(True)
         self.assertEqual(result, {"type": ["boolean", "null"]})
 
     def test_int_returns_nullable_number(self):
-        result = discover._infer_schema_from_value(42)
+        result = discover.infer_schema_from_value(42)
         self.assertEqual(result, {"type": ["number", "null"]})
 
     def test_float_returns_nullable_number(self):
-        result = discover._infer_schema_from_value(3.14)
+        result = discover.infer_schema_from_value(3.14)
         self.assertEqual(result, {"type": ["number", "null"]})
 
     def test_dict_returns_object_with_properties(self):
-        result = discover._infer_schema_from_value({"name": "Alice", "age": 30})
+        result = discover.infer_schema_from_value({"name": "Alice", "age": 30})
         self.assertEqual(result, {
             "type": "object",
             "properties": {
@@ -95,14 +94,14 @@ class TestInferSchemaFromValue(unittest.TestCase):
         })
 
     def test_list_returns_array_with_item_type(self):
-        result = discover._infer_schema_from_value(["a", "b"])
+        result = discover.infer_schema_from_value(["a", "b"])
         self.assertEqual(result, {
             "type": "array",
             "items": {"type": ["string", "null"]}
         })
 
     def test_empty_list_returns_array_with_nullable_string_items(self):
-        result = discover._infer_schema_from_value([])
+        result = discover.infer_schema_from_value([])
         self.assertEqual(result, {
             "type": "array",
             "items": {"type": ["string", "null"]}
@@ -235,43 +234,13 @@ class TestEnrichSchemaFromData(unittest.TestCase):
         self.assertEqual(result["properties"], original_props)
 
 
-class TestDiscoverStreamsIncludeAllColumns(unittest.TestCase):
-    """Test discover_streams with include_all_columns config."""
+class TestDiscoverStreamsEnrichment(unittest.TestCase):
+    """Test discover_streams always enriches schema from data."""
 
     @patch("tap_workday_raas.discover.enrich_schema_from_data")
     @patch("tap_workday_raas.discover.download_xsd")
-    def test_include_all_columns_true_calls_enrich(self, mock_xsd, mock_enrich):
-        """When include_all_columns is True, enrich_schema_from_data is called."""
-        mock_xsd.return_value = xsd
-        mock_enrich.side_effect = lambda schema, *a, **kw: schema
-
-        config = {
-            "username": "user",
-            "password": "pass",
-            "reports": '[{"report_url": "http://fake", "report_name": "test_report"}]',
-            "include_all_columns": True,
-        }
-        discover.discover_streams(config)
-        mock_enrich.assert_called_once()
-
-    @patch("tap_workday_raas.discover.enrich_schema_from_data")
-    @patch("tap_workday_raas.discover.download_xsd")
-    def test_include_all_columns_false_skips_enrich(self, mock_xsd, mock_enrich):
-        """When include_all_columns is False, enrich_schema_from_data is NOT called."""
-        mock_xsd.return_value = xsd
-        config = {
-            "username": "user",
-            "password": "pass",
-            "reports": '[{"report_url": "http://fake", "report_name": "test_report"}]',
-            "include_all_columns": False,
-        }
-        discover.discover_streams(config)
-        mock_enrich.assert_not_called()
-
-    @patch("tap_workday_raas.discover.enrich_schema_from_data")
-    @patch("tap_workday_raas.discover.download_xsd")
-    def test_include_all_columns_defaults_to_true(self, mock_xsd, mock_enrich):
-        """When include_all_columns is not in config, it defaults to True."""
+    def test_enrich_schema_always_called(self, mock_xsd, mock_enrich):
+        """enrich_schema_from_data is always called during discovery."""
         mock_xsd.return_value = xsd
         mock_enrich.side_effect = lambda schema, *a, **kw: schema
 

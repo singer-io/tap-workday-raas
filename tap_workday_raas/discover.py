@@ -5,6 +5,7 @@ import singer
 from singer import metadata
 
 from tap_workday_raas.client import download_xsd, stream_report
+from tap_workday_raas.schema_utils import infer_schema_from_value
 
 LOGGER = singer.get_logger()
 
@@ -33,7 +34,10 @@ def _element_to_schema(element):
         schema["type"].append("null")
 
     if is_list:
-        schema = {"type": "array", "items": schema}
+        if is_nullable:
+            schema = {"type": ["array", "null"], "items": schema}
+        else:
+            schema = {"type": "array", "items": schema}
 
     return schema
 
@@ -81,9 +85,13 @@ def generate_schema_for_report(xsd):
                 raise Exception("Found unexpected value for maxOccurs attribute: '{}'".format(max_occurs))
 
             is_list = max_occurs == "unbounded"
+            is_nullable = elem.attrib.get("minOccurs") == "0"
 
             if is_list:
-                elem_schema = {"type": "array", "items": complex_type_mapping[elem_type]}
+                if is_nullable:
+                    elem_schema = {"type": ["array", "null"], "items": complex_type_mapping[elem_type]}
+                else:
+                    elem_schema = {"type": "array", "items": complex_type_mapping[elem_type]}
             else:
                 elem_schema = complex_type_mapping[elem_type]
             schema["properties"][elem_name] = elem_schema
@@ -100,12 +108,25 @@ def _collect_flat_properties(properties, flat_props, prefix):
         full_key = "{}_{}".format(prefix, key) if prefix else key
         prop_type = prop_schema.get("type")
 
-        if prop_type == "object" and "properties" in prop_schema:
+        # Normalise type: ["array", "null"] -> "array", ["object", ...] -> "object"
+        if isinstance(prop_type, list):
+            non_null = [t for t in prop_type if t != "null"]
+            effective_type = non_null[0] if non_null else prop_type[0]
+        else:
+            effective_type = prop_type
+
+        if effective_type == "object" and "properties" in prop_schema:
             # Nested object – flatten its children into the parent
             _collect_flat_properties(prop_schema["properties"], flat_props, full_key)
-        elif prop_type == "array" and "items" in prop_schema:
+        elif effective_type == "array" and "items" in prop_schema:
             items = prop_schema["items"]
-            if items.get("type") == "object" and "properties" in items:
+            items_type = items.get("type")
+            if isinstance(items_type, list):
+                items_effective = [t for t in items_type if t != "null"]
+                items_effective = items_effective[0] if items_effective else items_type[0]
+            else:
+                items_effective = items_type
+            if items_effective == "object" and "properties" in items:
                 # Array of objects – flatten the object's children into the parent
                 _collect_flat_properties(items["properties"], flat_props, full_key)
             else:
@@ -132,33 +153,6 @@ def flatten_schema(schema):
     return {"type": "object", "properties": flat_props}
 
 
-def _infer_schema_from_value(value):
-    """Infer JSON schema type from a sample Python value.
-
-    Used when a column is found in the data but not in the XSD schema.
-    Defaults to nullable string for None values.
-    """
-    if value is None:
-        return {"type": ["string", "null"]}
-    elif isinstance(value, bool):
-        return {"type": ["boolean", "null"]}
-    elif isinstance(value, (int, float)):
-        return {"type": ["number", "null"]}
-    elif isinstance(value, dict):
-        properties = {}
-        for k, v in value.items():
-            properties[k] = _infer_schema_from_value(v)
-        return {"type": "object", "properties": properties}
-    elif isinstance(value, list):
-        if value:
-            items_schema = _infer_schema_from_value(value[0])
-        else:
-            items_schema = {"type": ["string", "null"]}
-        return {"type": "array", "items": items_schema}
-    else:
-        return {"type": ["string", "null"]}
-
-
 def enrich_schema_from_data(schema, report_url, username, password, sample_size=100):
     """Enrich schema with column definitions found in actual report data but missing from XSD.
 
@@ -180,7 +174,7 @@ def enrich_schema_from_data(schema, report_url, username, password, sample_size=
 
         for col, sample_value in all_columns.items():
             if col not in schema["properties"]:
-                inferred_schema = _infer_schema_from_value(sample_value)
+                inferred_schema = infer_schema_from_value(sample_value)
                 LOGGER.info(
                     'Found column "%s" in data not in XSD schema. '
                     'Adding with inferred type: %s',
@@ -204,7 +198,6 @@ def discover_streams(config):
 
     username = config["username"]
     password = config["password"]
-    include_all_columns = config.get("include_all_columns", True)
 
     for report in reports:
         LOGGER.info('Downloading XSD to determine table schema "%s".', report["report_name"])
@@ -212,9 +205,8 @@ def discover_streams(config):
         xsd = download_xsd(report["report_url"], username, password)
         schema = generate_schema_for_report(xsd)
 
-        if include_all_columns:
-            LOGGER.info('Enriching schema with columns from data for "%s".', report["report_name"])
-            schema = enrich_schema_from_data(schema, report["report_url"], username, password)
+        LOGGER.info('Enriching schema with columns from data for "%s".', report["report_name"])
+        schema = enrich_schema_from_data(schema, report["report_url"], username, password)
 
         # Flatten nested objects / arrays-of-objects so a single Workday
         # report always produces a single output dataset (no parent/child split).
