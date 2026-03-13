@@ -150,7 +150,12 @@ def flatten_schema(schema):
 
     flat_props = {}
     _collect_flat_properties(schema["properties"], flat_props, prefix="")
-    return {"type": "object", "properties": flat_props}
+
+    # Preserve all existing top-level schema fields and only replace properties.
+    new_schema = dict(schema)
+    new_schema["type"] = "object"
+    new_schema["properties"] = flat_props
+    return new_schema
 
 
 def enrich_schema_from_data(schema, report_url, username, password, sample_size=100):

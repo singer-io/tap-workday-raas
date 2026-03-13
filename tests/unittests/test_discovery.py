@@ -380,6 +380,21 @@ class TestFlattenSchema(unittest.TestCase):
         schema = {"type": "object"}
         self.assertEqual(discover.flatten_schema(schema), schema)
 
+    def test_flatten_preserves_extra_top_level_fields(self):
+        """flatten_schema should preserve top-level fields like additionalProperties."""
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "description": "test schema",
+            "properties": {
+                "col_a": {"type": ["string", "null"]},
+            }
+        }
+        result = discover.flatten_schema(schema)
+        self.assertFalse(result["additionalProperties"])
+        self.assertEqual(result["description"], "test schema")
+        self.assertIn("col_a", result["properties"])
+
 
 class TestDiscoverStreamsProducesFlatSchema(unittest.TestCase):
     """Verify that discover_streams returns a flat schema (no nesting)."""
