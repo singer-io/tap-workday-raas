@@ -70,6 +70,13 @@ class TestFlattenRecord(unittest.TestCase):
             "Compensation_group_Currency": "USD",
         })
 
+    def test_mixed_list_preserved(self):
+        """A list with both dicts and primitives should be kept as-is to avoid data loss."""
+        record = {"a": 1, "mixed": [{"child": "x"}, "primitive"]}
+        result = flatten_record(record)
+        # Mixed list preserved instead of silently dropping primitives
+        self.assertEqual(result, {"a": 1, "mixed": [{"child": "x"}, "primitive"]})
+
 
 # ---------------------------------------------------------------------------
 # Tests for infer_schema_from_value

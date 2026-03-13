@@ -766,6 +766,3 @@ class TestFlattenRecordWorkdayEdgeCases(unittest.TestCase):
         flat = flatten_record(record)
         self.assertEqual(flat["group_val"], "")
 
-
-if __name__ == "__main__":
-    unittest.main()

@@ -24,13 +24,25 @@ def flatten_record(record, parent_key='', sep='_'):
         if isinstance(value, dict):
             items.update(flatten_record(value, new_key, sep))
         elif isinstance(value, list):
-            flattened_any = False
-            for item in value:
-                if isinstance(item, dict):
+            if not value:
+                # Preserve existing behavior: ignore empty lists.
+                continue
+            has_dicts = any(isinstance(item, dict) for item in value)
+            has_non_dicts = any(not isinstance(item, dict) for item in value)
+            if has_dicts and not has_non_dicts:
+                # List of dicts – flatten each dict into the parent.
+                for item in value:
                     items.update(flatten_record(item, new_key, sep))
-                    flattened_any = True
-            if not flattened_any and value:
-                # Non-empty list of primitives – keep as-is
+            elif not has_dicts:
+                # Non-empty list of primitives – keep as-is.
+                items[new_key] = value
+            else:
+                # Mixed list of dicts and primitives – preserve list to avoid data loss.
+                LOGGER.warning(
+                    "Mixed list of dicts and primitives encountered at key '%s'; "
+                    "preserving original list instead of flattening.",
+                    new_key,
+                )
                 items[new_key] = value
         else:
             items[new_key] = value
