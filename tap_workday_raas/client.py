@@ -1,6 +1,9 @@
 import requests
 import ijson.backends.yajl2_c as ijson
 import ijson as ijson_core
+import singer
+
+LOGGER = singer.get_logger()
 
 
 def stream_report(report_url, user, password):
@@ -51,7 +54,11 @@ def stream_report(report_url, user, password):
             del records[:]
 
         if not found_key:
-            raise Exception("Did not see '{}' key in response. Report does not conform to expected schema, failing.".format(report_entry_key))
+            LOGGER.warning(
+                "Did not see '%s' key in response. "
+                "Report returned 0 rows (empty result set).",
+                report_entry_key.decode("utf-8"),
+            )
 
         coro.close()
 
