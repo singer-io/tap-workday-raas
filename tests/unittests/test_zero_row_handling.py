@@ -11,10 +11,9 @@ report on a day with no changes), the connector must:
 All API calls are mocked – no real credentials needed.
 """
 
-import io
 import json
 import unittest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 from tap_workday_raas import discover
 from tap_workday_raas.client import stream_report
@@ -181,6 +180,60 @@ class TestStreamReportZeroRows(unittest.TestCase):
         full_message = call_args[0][0] % call_args[0][1:]
         self.assertIn("Report_Entry", full_message)
         self.assertIn("0 rows", full_message)
+
+    @patch("tap_workday_raas.client.requests.get")
+    def test_unexpected_payload_raises_exception(self, mock_get):
+        """When the response has neither Report_Data nor Report_Entry
+        (unexpected schema change), an exception should be raised."""
+        body = json.dumps({"Unexpected_Key": {}}).encode("utf-8")
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [body]
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_get.return_value = mock_resp
+
+        with self.assertRaises(Exception) as ctx:
+            list(stream_report("http://fake", "u", "p"))
+        self.assertIn("Report_Data", str(ctx.exception))
+        self.assertIn("Report_Entry", str(ctx.exception))
+
+    @patch("tap_workday_raas.client.requests.get")
+    def test_report_entry_key_split_across_chunks(self, mock_get):
+        """When the Report_Entry key is split across chunk boundaries,
+        the parser-based key detection should still find it (no false
+        'missing key' warning).  The old raw-byte-scan approach would
+        have missed the key when it straddled two chunks."""
+        body = json.dumps({
+            "Report_Data": {
+                "Report_Entry": [
+                    {"Employee_ID": "E001"}
+                ]
+            }
+        }).encode("utf-8")
+        # Split the body so that "Report_Entry" is spread across two
+        # chunks – the first chunk ends in the middle of the key.
+        key_pos = body.index(b"Report_Entry")
+        split_point = key_pos + 5  # mid-key: "Repor" | "t_Entry..."
+        chunks = [body[:split_point], body[split_point:]]
+
+        # Verify the key IS actually split (sanity check for the test)
+        self.assertNotIn(b"Report_Entry", chunks[0])
+        self.assertNotIn(b"Report_Entry", chunks[1])
+
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = chunks
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_get.return_value = mock_resp
+
+        with patch("tap_workday_raas.client.LOGGER") as mock_logger:
+            # Consume the generator – the key detection must succeed
+            list(stream_report("http://fake", "u", "p"))
+            # Parser-based detection should find the key despite the split;
+            # no "missing key" warning should be emitted.
+            mock_logger.warning.assert_not_called()
 
 
 # ===================================================================
@@ -488,7 +541,3 @@ class TestEndToEndZeroRows(unittest.TestCase):
         self.assertIn("Name", schema["properties"])
         self.assertIn("Comp_group_Pay_Rate", schema["properties"])
         self.assertIn("Comp_group_Currency", schema["properties"])
-
-
-if __name__ == "__main__":
-    unittest.main()
