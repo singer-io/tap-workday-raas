@@ -251,4 +251,3 @@ class TestDiscoverStreamsEnrichment(unittest.TestCase):
         }
         discover.discover_streams(config)
         mock_enrich.assert_called_once()
-
