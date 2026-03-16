@@ -1,6 +1,7 @@
 import json
 from xml.etree import ElementTree
 import singer
+import requests
 
 from singer import metadata
 
@@ -148,25 +149,80 @@ def discover_streams(config):
     username = config["username"]
     password = config["password"]
 
+    failed_reports = []
+
     for report in reports:
-        LOGGER.info('Downloading XSD to determine table schema "%s".', report["report_name"])
+        report_name = report["report_name"]
+        report_url = report["report_url"]
 
-        xsd = download_xsd(report["report_url"], username, password)
-        schema = generate_schema_for_report(xsd)
+        LOGGER.info('Downloading XSD to determine table schema "%s"', report_name)
 
-        LOGGER.info('Enriching schema with columns from data for "%s".', report["report_name"])
-        schema = enrich_schema_from_data(schema, report["report_url"], username, password)
+        try:
+            xsd = download_xsd(report_url, username, password)
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if e.response is not None else "unknown"
+            response_text = e.response.text.strip() if e.response is not None else ""
+            LOGGER.error(
+                'Failed to download XSD for report "%s" (url: %s). '
+                'HTTP status: %s. Server message: %s',
+                report_name, report_url, status_code, response_text or "(no response body)"
+            )
+            failed_reports.append(
+                'Report "{name}" (url: {url}) - HTTP {status}: {msg}'.format(
+                    name=report_name,
+                    url=report_url,
+                    status=status_code,
+                    msg=response_text or "(no response body)",
+                )
+            )
+            continue
+        except Exception as e:
+            LOGGER.error(
+                'Unexpected error downloading XSD for report "%s" (url: %s): %s',
+                report_name, report_url, str(e)
+            )
+            failed_reports.append(
+                'Report "{name}" (url: {url}) - {err}'.format(
+                    name=report_name, url=report_url, err=str(e)
+                )
+            )
+            continue
+
+        try:
+            schema = generate_schema_for_report(xsd)
+        except Exception as e:
+            LOGGER.error(
+                'Failed to generate schema for report "%s" (url: %s): %s',
+                report_name, report_url, str(e)
+            )
+            failed_reports.append(
+                'Report "{name}" (url: {url}) - schema generation error: {err}'.format(
+                    name=report_name, url=report_url, err=str(e)
+                )
+            )
+            continue
+
+        LOGGER.info('Enriching schema with columns from data for "%s".', report_name)
+        schema = enrich_schema_from_data(schema, report_url, username, password)
 
         stream_md = metadata.get_standard_metadata(schema,
                                                    key_properties=report.get("key_properties"),
                                                    replication_method="FULL_TABLE")
         streams.append(
             {
-                "stream": report["report_name"],
-                "tap_stream_id": report["report_name"],
+                "stream": report_name,
+                "tap_stream_id": report_name,
                 "schema": schema,
                 "metadata": stream_md
             }
+        )
+
+    if failed_reports:
+        raise Exception(
+            "Discovery failed for {} report(s):\n{}".format(
+                len(failed_reports),
+                "\n".join("  - {}".format(r) for r in failed_reports)
+            )
         )
 
     return streams
