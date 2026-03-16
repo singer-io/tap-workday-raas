@@ -1,6 +1,5 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from unittest import mock
 import requests
 from tap_workday_raas import discover
 
@@ -352,7 +351,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/r2", "report_name": "report_2"},
         ])
         with self.assertRaises(Exception) as ctx:
-            streams = discover.discover_streams(config)
+            discover.discover_streams(config)
 
         # The exception should only mention the failed report
         error_msg = str(ctx.exception)
@@ -374,7 +373,6 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/r2", "report_name": "report_2"},
         ])
 
-        discovered_streams = []
         try:
             discover.discover_streams(config)
         except Exception:

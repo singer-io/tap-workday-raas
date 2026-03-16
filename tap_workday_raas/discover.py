@@ -11,6 +11,18 @@ from tap_workday_raas.schema_utils import infer_schema_from_value
 LOGGER = singer.get_logger()
 
 
+def _sanitize_response_text(text, max_length=500):
+    """Sanitize HTTP response text for safe logging and error aggregation."""
+    if text is None:
+        return ""
+    # Replace newlines with spaces to keep logs and aggregated messages readable
+    sanitized = " ".join(text.splitlines())
+    sanitized = sanitized.strip()
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length] + "... [truncated]"
+    return sanitized
+
+
 def _element_to_schema(element):
     elem_type = element.attrib["type"].split(":")[1]
     is_nullable = element.attrib.get("minOccurs") == "0"
@@ -161,7 +173,7 @@ def discover_streams(config):
             xsd = download_xsd(report_url, username, password)
         except requests.exceptions.HTTPError as e:
             status_code = e.response.status_code if e.response is not None else "unknown"
-            response_text = e.response.text.strip() if e.response is not None else ""
+            response_text = _sanitize_response_text(e.response.text if e.response is not None else None)
             LOGGER.error(
                 'Failed to download XSD for report "%s" (url: %s). '
                 'HTTP status: %s. Server message: %s',
