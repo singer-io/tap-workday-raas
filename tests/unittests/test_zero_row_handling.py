@@ -265,8 +265,7 @@ class TestSyncReportZeroRows(unittest.TestCase):
         return {"report_url": "http://fake", "report_name": "daily_updates"}
 
     def test_zero_rows_returns_zero(self, mock_stream_report, mock_singer):
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema = discover.generate_schema_for_report(XSD_FLAT)
         stream = _make_stream("daily_updates", schema)
         mock_stream_report.return_value = iter([])
 
@@ -275,8 +274,7 @@ class TestSyncReportZeroRows(unittest.TestCase):
         self.assertEqual(count, 0)
 
     def test_zero_rows_no_record_messages(self, mock_stream_report, mock_singer):
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema = discover.generate_schema_for_report(XSD_FLAT)
         stream = _make_stream("daily_updates", schema)
         mock_stream_report.return_value = iter([])
 
@@ -287,8 +285,7 @@ class TestSyncReportZeroRows(unittest.TestCase):
     def test_zero_rows_write_version_still_called(self, mock_stream_report, mock_singer):
         """write_version should still be called so the target knows the
         sync completed (even with 0 rows)."""
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema = discover.generate_schema_for_report(XSD_FLAT)
         stream = _make_stream("daily_updates", schema)
         mock_stream_report.return_value = iter([])
 
@@ -298,8 +295,7 @@ class TestSyncReportZeroRows(unittest.TestCase):
 
     def test_zero_rows_no_exception(self, mock_stream_report, mock_singer):
         """Explicitly verify that no exception propagates."""
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema = discover.generate_schema_for_report(XSD_FLAT)
         stream = _make_stream("daily_updates", schema)
         mock_stream_report.return_value = iter([])
 
@@ -310,8 +306,7 @@ class TestSyncReportZeroRows(unittest.TestCase):
 
     def test_zero_rows_with_subgroup_schema(self, mock_stream_report, mock_singer):
         """Zero rows on a report that has sub-groups – still no error."""
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_WITH_SUBGROUP))
+        schema = discover.generate_schema_for_report(XSD_WITH_SUBGROUP)
         stream = _make_stream("comp_report", schema)
         mock_stream_report.return_value = iter([])
 
@@ -339,8 +334,7 @@ class TestSchemaPreservedOnZeroRows(unittest.TestCase):
 
         mock_stream_report.return_value = iter([])
 
-        schema_dict = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema_dict = discover.generate_schema_for_report(XSD_FLAT)
 
         # Build a mock catalog
         stream_obj = MagicMock()
@@ -387,11 +381,10 @@ class TestSchemaPreservedOnZeroRows(unittest.TestCase):
         })
 
         schema = streams[0]["schema"]
-        # All flattened columns must be present
+        # All columns from XSD must be present
         self.assertIn("Employee_ID", schema["properties"])
         self.assertIn("Name", schema["properties"])
-        self.assertIn("Comp_group_Pay_Rate", schema["properties"])
-        self.assertIn("Comp_group_Currency", schema["properties"])
+        self.assertIn("Comp_group", schema["properties"])
 
 
 # ===================================================================
@@ -414,8 +407,7 @@ class TestZeroRowLogging(unittest.TestCase):
     def test_sync_report_logs_zero_rows_info(self, mock_logger,
                                               mock_stream_report, mock_singer):
         """sync_report should log an INFO message about 0 rows."""
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema = discover.generate_schema_for_report(XSD_FLAT)
         stream = _make_stream("daily_updates", schema)
         mock_stream_report.return_value = iter([])
 
@@ -436,8 +428,7 @@ class TestZeroRowLogging(unittest.TestCase):
                                                           mock_stream_report,
                                                           mock_singer):
         """No ERROR or CRITICAL log should be emitted for zero rows."""
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema = discover.generate_schema_for_report(XSD_FLAT)
         stream = _make_stream("daily_updates", schema)
         mock_stream_report.return_value = iter([])
 
@@ -451,8 +442,7 @@ class TestZeroRowLogging(unittest.TestCase):
                                                      mock_stream_report,
                                                      mock_singer):
         """When rows ARE present, the zero-row message should NOT appear."""
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema = discover.generate_schema_for_report(XSD_FLAT)
         stream = _make_stream("daily_updates", schema)
         mock_stream_report.return_value = iter([
             {"Employee_ID": "E1", "Change_Date": "2024-01-01",
@@ -488,8 +478,7 @@ class TestEndToEndZeroRows(unittest.TestCase):
         return {"report_url": "http://fake", "report_name": "rpt"}
 
     def test_flat_report_zero_rows_end_to_end(self, mock_stream_report, mock_singer):
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema = discover.generate_schema_for_report(XSD_FLAT)
         stream = _make_stream("rpt", schema)
         mock_stream_report.return_value = iter([])
 
@@ -500,8 +489,7 @@ class TestEndToEndZeroRows(unittest.TestCase):
         mock_singer.RecordMessage.assert_not_called()
 
     def test_subgroup_report_zero_rows_end_to_end(self, mock_stream_report, mock_singer):
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_WITH_SUBGROUP))
+        schema = discover.generate_schema_for_report(XSD_WITH_SUBGROUP)
         stream = _make_stream("rpt", schema)
         mock_stream_report.return_value = iter([])
 
@@ -514,8 +502,7 @@ class TestEndToEndZeroRows(unittest.TestCase):
     def test_zero_then_nonzero_rows_sequential(self, mock_stream_report, mock_singer):
         """Simulate two sequential syncs: first returns 0 rows, second
         returns data. Both must succeed."""
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_FLAT))
+        schema = discover.generate_schema_for_report(XSD_FLAT)
 
         # First sync – zero rows
         stream1 = _make_stream("rpt", schema)
@@ -540,15 +527,13 @@ class TestEndToEndZeroRows(unittest.TestCase):
     def test_schema_columns_match_xsd_on_zero_rows(self, mock_stream_report, mock_singer):
         """Even with 0 rows, the schema used by sync_report should still
         contain all columns from the XSD."""
-        schema = discover.flatten_schema(
-            discover.generate_schema_for_report(XSD_WITH_SUBGROUP))
+        schema = discover.generate_schema_for_report(XSD_WITH_SUBGROUP)
         stream = _make_stream("rpt", schema)
         mock_stream_report.return_value = iter([])
 
         sync_report(self._report(), stream, self._config())
 
-        # The schema that was built should have all 4 columns
+        # The schema that was built should have all columns from XSD
         self.assertIn("Employee_ID", schema["properties"])
         self.assertIn("Name", schema["properties"])
-        self.assertIn("Comp_group_Pay_Rate", schema["properties"])
-        self.assertIn("Comp_group_Currency", schema["properties"])
+        self.assertIn("Comp_group", schema["properties"])

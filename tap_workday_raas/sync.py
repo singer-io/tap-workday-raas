@@ -8,47 +8,6 @@ from .schema_utils import infer_schema_from_value
 LOGGER = singer.get_logger()
 
 
-def flatten_record(record, parent_key='', sep='_'):
-    """Flatten nested dicts and lists-of-dicts into a single-level dict.
-
-    Keys are built by joining the nesting path with *sep*.  For example::
-
-        {"group": [{"col": "val"}]}  ->  {"group_col": "val"}
-
-    This ensures every Workday report row is emitted as a single flat record
-    so targets do not split it into parent/child tables.
-    """
-    items = {}
-    for key, value in record.items():
-        new_key = "{}{}{}".format(parent_key, sep, key) if parent_key else key
-        if isinstance(value, dict):
-            items.update(flatten_record(value, new_key, sep))
-        elif isinstance(value, list):
-            if not value:
-                # Preserve existing behavior: ignore empty lists.
-                continue
-            has_dicts = any(isinstance(item, dict) for item in value)
-            has_non_dicts = any(not isinstance(item, dict) for item in value)
-            if has_dicts and not has_non_dicts:
-                # List of dicts – flatten each dict into the parent.
-                for item in value:
-                    items.update(flatten_record(item, new_key, sep))
-            elif not has_dicts:
-                # Non-empty list of primitives – keep as-is.
-                items[new_key] = value
-            else:
-                # Mixed list of dicts and primitives – preserve list to avoid data loss.
-                LOGGER.warning(
-                    "Mixed list of dicts and primitives encountered at key '%s'; "
-                    "preserving original list instead of flattening.",
-                    new_key,
-                )
-                items[new_key] = value
-        else:
-            items[new_key] = value
-    return items
-
-
 def sync_report(report, stream, config):
     report_url = report["report_url"]
     username = config["username"]
@@ -72,10 +31,6 @@ def sync_report(report, stream, config):
 
     with Transformer() as transformer:
         for record in stream_report(report_url, username, password):
-            # Flatten nested structures so a single report produces a single
-            # flat dataset (no parent/child table splitting).
-            record = flatten_record(record)
-
             # Detect columns in the record that are not yet in the schema
             new_columns = set(record.keys()) - set(schema_properties.keys())
             if new_columns:

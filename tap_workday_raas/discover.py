@@ -102,62 +102,6 @@ def generate_schema_for_report(xsd):
     return schema
 
 
-def _collect_flat_properties(properties, flat_props, prefix):
-    """Recursively collect properties, flattening nested objects and arrays of objects."""
-    for key, prop_schema in properties.items():
-        full_key = "{}_{}".format(prefix, key) if prefix else key
-        prop_type = prop_schema.get("type")
-
-        # Normalise type: ["array", "null"] -> "array", ["object", ...] -> "object"
-        if isinstance(prop_type, list):
-            non_null = [t for t in prop_type if t != "null"]
-            effective_type = non_null[0] if non_null else prop_type[0]
-        else:
-            effective_type = prop_type
-
-        if effective_type == "object" and "properties" in prop_schema:
-            # Nested object – flatten its children into the parent
-            _collect_flat_properties(prop_schema["properties"], flat_props, full_key)
-        elif effective_type == "array" and "items" in prop_schema:
-            items = prop_schema["items"]
-            items_type = items.get("type")
-            if isinstance(items_type, list):
-                items_effective = [t for t in items_type if t != "null"]
-                items_effective = items_effective[0] if items_effective else items_type[0]
-            else:
-                items_effective = items_type
-            if items_effective == "object" and "properties" in items:
-                # Array of objects – flatten the object's children into the parent
-                _collect_flat_properties(items["properties"], flat_props, full_key)
-            else:
-                # Array of primitives – keep as-is
-                flat_props[full_key] = prop_schema
-        else:
-            flat_props[full_key] = prop_schema
-
-
-def flatten_schema(schema):
-    """Flatten a schema so that nested object / array-of-object properties
-    are promoted to the top level with underscore-joined names.
-
-    A single Workday report should produce a single output dataset.  The XSD
-    often defines complex-type sub-groups that cause targets (e.g. BigQuery)
-    to split the data into parent/child tables.  Flattening the schema
-    prevents that split.
-    """
-    if schema.get("type") != "object" or "properties" not in schema:
-        return schema
-
-    flat_props = {}
-    _collect_flat_properties(schema["properties"], flat_props, prefix="")
-
-    # Preserve all existing top-level schema fields and only replace properties.
-    new_schema = dict(schema)
-    new_schema["type"] = "object"
-    new_schema["properties"] = flat_props
-    return new_schema
-
-
 def enrich_schema_from_data(schema, report_url, username, password, sample_size=100):
     """Enrich schema with column definitions found in actual report data but missing from XSD.
 
@@ -212,10 +156,6 @@ def discover_streams(config):
 
         LOGGER.info('Enriching schema with columns from data for "%s".', report["report_name"])
         schema = enrich_schema_from_data(schema, report["report_url"], username, password)
-
-        # Flatten nested objects / arrays-of-objects so a single Workday
-        # report always produces a single output dataset (no parent/child split).
-        schema = flatten_schema(schema)
 
         stream_md = metadata.get_standard_metadata(schema,
                                                    key_properties=report.get("key_properties"),
