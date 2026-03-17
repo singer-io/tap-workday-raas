@@ -1,6 +1,9 @@
 import requests
 import ijson.backends.yajl2_c as ijson
 import ijson as ijson_core
+import singer
+
+LOGGER = singer.get_logger()
 
 
 def stream_report(report_url, user, password):
@@ -41,19 +44,51 @@ def stream_report(report_url, user, password):
         records = ijson_core.sendable_list()
         coro = ijson.items_coro(records, search_prefix)
 
-        found_key = False
+        # Track key presence using an ijson event parser so we are not
+        # vulnerable to the key name being split across chunk boundaries
+        # (raw byte scanning of small chunks could miss it).
+        key_events = ijson_core.sendable_list()
+        key_coro = ijson.parse_coro(key_events)
+        found_report_entry = False
+        response_is_json_object = False
+
         for chunk in resp.iter_content(chunk_size=512):
-            if report_entry_key in chunk:
-                found_key = True
             coro.send(chunk)
+            key_coro.send(chunk)
+
+            # Scan parser events returned so far for the keys we care about
+            for prefix, event, _value in key_events:
+                if prefix == "" and event == "start_map":
+                    response_is_json_object = True
+                elif prefix == "" and event == "map_key" and _value == report_entry_key.decode("utf-8"):
+                    found_report_entry = True
+            del key_events[:]
+
             for rec in records:
                 yield rec
             del records[:]
 
-        if not found_key:
-            raise Exception("Did not see '{}' key in response. Report does not conform to expected schema, failing.".format(report_entry_key))
+        if not found_report_entry:
+            if response_is_json_object:
+                # The response is valid JSON but does not contain the
+                # Report_Entry key.  This is the standard Workday zero-row
+                # response – log a warning and continue.
+                LOGGER.warning(
+                    "Did not see '%s' key in response. "
+                    "Report returned 0 rows (empty result set).",
+                    report_entry_key.decode("utf-8"),
+                )
+            else:
+                # Unexpected payload – the response is not even a JSON
+                # object.  This likely indicates an API error.
+                raise Exception(
+                    "Did not see '{}' key in response. "
+                    "Report does not conform to expected schema, failing."
+                    .format(report_entry_key.decode("utf-8"))
+                )
 
         coro.close()
+        key_coro.close()
 
 
 def download_xsd(report_url, user, password):

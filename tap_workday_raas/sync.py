@@ -58,4 +58,7 @@ def sync_report(report, stream, config):
             singer.write_message(record_message)
             record_count += 1
 
+    if record_count == 0:
+        LOGGER.info('Report "%s" returned 0 rows. Completing successfully with empty result set.', report_url)
+
     return record_count
