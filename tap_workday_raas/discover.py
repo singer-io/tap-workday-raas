@@ -143,6 +143,10 @@ def enrich_schema_from_data(schema, report_url, username, password, sample_size=
                     col, inferred_schema
                 )
                 schema["properties"][col] = inferred_schema
+    except requests.exceptions.HTTPError:
+        # HTTP errors (e.g. 403, 500) are fatal for this report – re-raise so
+        # discover_streams can catch them per-report and surface a clear message.
+        raise
     except Exception as e:
         LOGGER.warning(
             "Could not enrich schema from data sampling: %s. "
@@ -180,7 +184,7 @@ def discover_streams(config):
                 report_name, report_url, status_code, response_text or "(no response body)"
             )
             failed_reports.append(
-                'Report "{name}" (url: {url}) - HTTP {status}: {msg}'.format(
+                'Report "{name}" (url: {url}) - [schema download] HTTP {status}: {msg}'.format(
                     name=report_name,
                     url=report_url,
                     status=status_code,
@@ -194,7 +198,7 @@ def discover_streams(config):
                 report_name, report_url, str(e)
             )
             failed_reports.append(
-                'Report "{name}" (url: {url}) - {err}'.format(
+                'Report "{name}" (url: {url}) - [schema download] {err}'.format(
                     name=report_name, url=report_url, err=str(e)
                 )
             )
@@ -215,7 +219,25 @@ def discover_streams(config):
             continue
 
         LOGGER.info('Enriching schema with columns from data for "%s".', report_name)
-        schema = enrich_schema_from_data(schema, report_url, username, password)
+        try:
+            schema = enrich_schema_from_data(schema, report_url, username, password)
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if e.response is not None else "unknown"
+            response_text = _sanitize_response_text(e.response.text if e.response is not None else None)
+            LOGGER.error(
+                'Failed to fetch report data for "%s" (url: %s). '
+                'HTTP status: %s. Server message: %s',
+                report_name, report_url, status_code, response_text or "(no response body)"
+            )
+            failed_reports.append(
+                'Report "{name}" (url: {url}) - [data fetch] HTTP {status}: {msg}'.format(
+                    name=report_name,
+                    url=report_url,
+                    status=status_code,
+                    msg=response_text or "(no response body)",
+                )
+            )
+            continue
 
         stream_md = metadata.get_standard_metadata(schema,
                                                    key_properties=report.get("key_properties"),

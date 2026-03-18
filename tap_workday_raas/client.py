@@ -27,6 +27,10 @@ def stream_report(report_url, user, password):
 
     # Get the data
     with requests.get(corrected_url, auth=(user, password), stream=True) as resp:
+        if not resp.ok:
+            # Force-read the error response body before raise_for_status() closes
+            # the connection, so e.response.text is accessible to callers.
+            _ = resp.content
         resp.raise_for_status()
 
         # Set up our search key
