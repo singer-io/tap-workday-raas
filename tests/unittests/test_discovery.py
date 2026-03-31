@@ -263,6 +263,63 @@ def _make_http_error(status_code, response_text="Server Error"):
     return error
 
 
+class TestDiscoverStreamsDuplicateReportNames(unittest.TestCase):
+    """Test that duplicate report names are rejected during discovery."""
+
+    def _config(self, reports):
+        import json
+        return {
+            "username": "user",
+            "password": "pass",
+            "reports": json.dumps(reports),
+        }
+
+    def test_duplicate_report_names_raises_value_error(self):
+        """discover_streams raises ValueError when two reports share the same name."""
+        config = self._config([
+            {"report_url": "http://fake/r1", "report_name": "my_report"},
+            {"report_url": "http://fake/r2", "report_name": "my_report"},
+        ])
+        with self.assertRaises(ValueError) as ctx:
+            discover.discover_streams(config)
+
+        self.assertIn("my_report", str(ctx.exception))
+
+    def test_multiple_duplicate_report_names_all_listed(self):
+        """All duplicate names are included in the error message."""
+        config = self._config([
+            {"report_url": "http://fake/r1", "report_name": "report_a"},
+            {"report_url": "http://fake/r2", "report_name": "report_b"},
+            {"report_url": "http://fake/r3", "report_name": "report_a"},
+            {"report_url": "http://fake/r4", "report_name": "report_b"},
+        ])
+        with self.assertRaises(ValueError) as ctx:
+            discover.discover_streams(config)
+
+        error_msg = str(ctx.exception)
+        self.assertIn("report_a", error_msg)
+        self.assertIn("report_b", error_msg)
+
+    def test_unique_report_names_does_not_raise(self):
+        """No error is raised when all report names are unique."""
+        from unittest.mock import patch
+        with patch("tap_workday_raas.discover.download_xsd") as mock_xsd, \
+             patch("tap_workday_raas.discover.enrich_schema_from_data") as mock_enrich:
+            import xml.etree.ElementTree as ET
+            mock_xsd.return_value = xsd
+            mock_enrich.side_effect = lambda schema, *a, **kw: schema
+
+            config = self._config([
+                {"report_url": "http://fake/r1", "report_name": "report_x"},
+                {"report_url": "http://fake/r2", "report_name": "report_y"},
+            ])
+            # Should not raise
+            streams = discover.discover_streams(config)
+            stream_names = [s["tap_stream_id"] for s in streams]
+            self.assertIn("report_x", stream_names)
+            self.assertIn("report_y", stream_names)
+
+
 class TestDiscoverStreamsErrorHandling(unittest.TestCase):
     """Test per-report error handling in discover_streams."""
 

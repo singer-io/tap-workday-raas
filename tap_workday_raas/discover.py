@@ -162,6 +162,17 @@ def discover_streams(config):
 
     reports = json.loads(config["reports"])
 
+    report_names = [report["report_name"] for report in reports]
+    seen = set()
+    duplicates = {name for name in report_names if name in seen or seen.add(name)}
+    if duplicates:
+        raise ValueError(
+            "Duplicate report name(s) found in config: {}. "
+            "Each report_name must be unique as it is used as the stream name.".format(
+                ", ".join(sorted(duplicates))
+            )
+        )
+
     username = config["username"]
     password = config["password"]
 
