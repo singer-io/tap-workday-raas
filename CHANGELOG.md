@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.1.1
+  * Bump requests to 2.33.0 for security updates [#30](https://github.com/singer-io/tap-workday-raas/pull/30)
+
+
 ## 1.2.0
   * Updates backoff, requests and singer-python versions [#21](https://github.com/singer-io/tap-workday-raas/pull/21)
 
