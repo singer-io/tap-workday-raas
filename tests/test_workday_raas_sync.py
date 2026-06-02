@@ -39,7 +39,7 @@ class WorkdayRaasSync(unittest.TestCase):
         return {
             'start_date' : '2020-03-15T00:00:00Z',
             'username': os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
-            'reports': json.dumps([{'report_url': 'https://wd2-impl-services1.workday.com/ccx/service/customreport2/talend_dpt1/tserrano/Customer_Invoice_Action_List?Company!WID=a4bb5f2c512649c68f072ef8035a6908&format=rss',
+            'reports': json.dumps([{'report_url': 'https://wd2-impl-services1.workday.com/ccx/service/customreport2/talend_dpt1/tserrano/Customer_Invoice_Action_List?Company!WID=cb550da820584750aae8f807882fa79a&format=rss',
                                     'report_name': 'stitch_test_report'}]),
         }
 
