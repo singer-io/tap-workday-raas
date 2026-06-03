@@ -33,7 +33,7 @@ def _element_to_schema(element):
         schema["type"].append("null")
 
     if is_list:
-        schema = {"type": "array", "items": schema}
+        schema = {"type": ["null", "array"], "items": schema}
 
     return schema
 
@@ -43,7 +43,7 @@ def parse_complex_type(complex_type_selectors, xsd_schema_et, ns):
     for selector in complex_type_selectors:
         complex_type = xsd_schema_et.find(selector, ns)
         name = complex_type.attrib["name"]
-        complex_type_mapping[name] = {"type": "object", "properties": {}}
+        complex_type_mapping[name] = {"type": ["null", "object"], "properties": {}}
         for element in complex_type.findall(".//xsd:element", ns):
             elem_name = element.attrib["name"]
             schema_type = _element_to_schema(element)
@@ -83,7 +83,7 @@ def generate_schema_for_report(xsd):
             is_list = max_occurs == "unbounded"
 
             if is_list:
-                elem_schema = {"type": "array", "items": complex_type_mapping[elem_type]}
+                elem_schema = {"type": ["null", "array"], "items": complex_type_mapping[elem_type]}
             else:
                 elem_schema = complex_type_mapping[elem_type]
             schema["properties"][elem_name] = elem_schema

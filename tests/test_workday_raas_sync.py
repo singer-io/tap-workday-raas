@@ -37,9 +37,9 @@ class WorkdayRaasSync(unittest.TestCase):
 
     def get_properties(self):
         return {
-            'start_date' : '2015-03-15T00:00:00Z',
+            'start_date' : '2020-03-15T00:00:00Z',
             'username': os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
-            'reports': json.dumps([{'report_url': 'https://wd2-impl-services1.workday.com/ccx/service/customreport2/talend_dpt1/lmcneil/Stitch_Testing_2',
+            'reports': json.dumps([{'report_url': 'https://wd2-impl-services1.workday.com/ccx/service/customreport2/talend_dpt1/tserrano/Customer_Invoice_Action_List?Company!WID=cb550da820584750aae8f807882fa79a&format=rss',
                                     'report_name': 'stitch_test_report'}]),
         }
 
