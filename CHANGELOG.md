@@ -1,7 +1,9 @@
 # Changelog
 
 ## 1.2.1
-  * Makes JSON fields nullable and adds tests. Updates requests and singer-python versions [#29](https://github.com/singer-io/tap-workday-raas/pull/29)
+  * Makes JSON fields nullable and adds tests. Updates requests, ijson and singer-python versions [#29](https://github.com/singer-io/tap-workday-raas/pull/29)
+  * Validation for duplicate report name
+  * Check access of report url [#27](https://github.com/singer-io/tap-workday-raas/pull/27)
 
 ## 1.2.0
   * Updates backoff, requests and singer-python versions [#21](https://github.com/singer-io/tap-workday-raas/pull/21)
