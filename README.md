@@ -28,8 +28,8 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
 
    Create your tap's `config.json` file.  The tap authenticates to Workday using
    OAuth 2.0.  You must complete the OAuth authorization flow externally (e.g.
-   using the Workday authorization endpoint) to obtain an initial access token and
-   refresh token before running the tap.
+   using the Workday authorization endpoint) to obtain a refresh token before
+   running the tap.
 
    Required fields:
 

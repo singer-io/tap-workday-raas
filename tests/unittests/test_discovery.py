@@ -10,7 +10,6 @@ from tap_workday_raas.client import WorkdayOAuthClient
 def _make_auth_client():
     """Return a WorkdayOAuthClient with fake test credentials."""
     client = WorkdayOAuthClient({
-        "access_token": "test-access-token",
         "client_id": "test-client-id",
         "client_secret": "test-client-secret",
         "refresh_token": "test-refresh-token",

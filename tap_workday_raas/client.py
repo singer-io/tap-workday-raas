@@ -74,15 +74,13 @@ class WorkdayOAuthClient:
             )
         if not resp.ok:
             raise WorkdayRaasAuthenticationError(
-                "OAuth token request failed (HTTP {}): {}".format(
-                    resp.status_code, resp.text[:300]
-                )
+                "OAuth token request failed (HTTP {}).".format(resp.status_code)
             )
 
         token_data = resp.json()
         new_token = token_data.get("access_token")
         if not new_token:
-            raise Exception(
+            raise WorkdayRaasAuthenticationError(
                 "Token endpoint response is missing the 'access_token' field."
             )
         expires_in = int(token_data.get("expires_in", 3600))
@@ -128,6 +126,7 @@ class WorkdayOAuthClient:
         """Make an authenticated GET request, retrying once on 401/403."""
         resp = requests.get(url, headers=self._auth_headers(), **kwargs)
         if resp.status_code in _AUTH_FAILURE_CODES:
+            resp.close()
             LOGGER.info(
                 "Access token rejected (HTTP %s). Attempting token refresh.",
                 resp.status_code,

@@ -3,4 +3,4 @@ class WorkdayRaasError(Exception):
 
 
 class WorkdayRaasAuthenticationError(WorkdayRaasError):
-    """Raised when credentials are invalid or expired (HTTP 401 / authentication failure)."""
+    """Raised when OAuth authentication fails (e.g. HTTP 401/403) or token refresh cannot be completed."""

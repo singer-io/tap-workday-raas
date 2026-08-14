@@ -1,4 +1,4 @@
-﻿import json
+import json
 import time
 import unittest
 from unittest.mock import patch, MagicMock, mock_open
