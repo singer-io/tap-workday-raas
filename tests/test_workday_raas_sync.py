@@ -9,10 +9,19 @@ import json
 
 class WorkdayRaasSync(unittest.TestCase):
     def setUp(self):
-        missing_envs = [x for x in [os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
-                                    os.getenv('TAP_WORKDAY_RAAS_PASSWORD')] if x == None]
+        missing_envs = [x for x in [
+            os.getenv('TAP_WORKDAY_RAAS_HOSTNAME'),
+            os.getenv('TAP_WORKDAY_RAAS_TENANT'),
+            os.getenv('TAP_WORKDAY_RAAS_CLIENT_ID'),
+            os.getenv('TAP_WORKDAY_RAAS_CLIENT_SECRET'),
+            os.getenv('TAP_WORKDAY_RAAS_REFRESH_TOKEN'),
+        ] if x is None]
         if len(missing_envs) != 0:
-            raise Exception("set TAP_WORKDAY_RAAS_USERNAME, TAP_WORKDAY_RAAS_PASSWORD")
+            raise Exception(
+                "set TAP_WORKDAY_RAAS_HOSTNAME, TAP_WORKDAY_RAAS_TENANT, "
+                "TAP_WORKDAY_RAAS_CLIENT_ID, TAP_WORKDAY_RAAS_CLIENT_SECRET, "
+                "TAP_WORKDAY_RAAS_REFRESH_TOKEN"
+            )
 
     def name(self):
         return "tap_tester_workday_raas_sync"
@@ -21,7 +30,10 @@ class WorkdayRaasSync(unittest.TestCase):
         return "platform.workday-raas"
 
     def get_credentials(self):
-        return {'password': os.getenv('TAP_WORKDAY_RAAS_PASSWORD')}
+        return {
+            'client_secret': os.getenv('TAP_WORKDAY_RAAS_CLIENT_SECRET'),
+            'refresh_token': os.getenv('TAP_WORKDAY_RAAS_REFRESH_TOKEN'),
+        }
 
     def expected_check_streams(self):
         return {'stitch_test_report'}
@@ -37,10 +49,16 @@ class WorkdayRaasSync(unittest.TestCase):
 
     def get_properties(self):
         return {
-            'start_date' : '2020-03-15T00:00:00Z',
-            'username': os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
-            'reports': json.dumps([{'report_url': 'https://wd2-impl-services1.workday.com/ccx/service/customreport2/talend_dpt1/tserrano/Customer_Invoice_Action_List?Company!WID=cb550da820584750aae8f807882fa79a&format=rss',
-                                    'report_name': 'stitch_test_report'}]),
+            'hostname': os.getenv('TAP_WORKDAY_RAAS_HOSTNAME'),
+            'tenant': os.getenv('TAP_WORKDAY_RAAS_TENANT'),
+            'client_id': os.getenv('TAP_WORKDAY_RAAS_CLIENT_ID'),
+            'reports': json.dumps([{
+                'report_url': 'https://{}/ccx/service/customreport2/{}/lmcneil/Stitch_Testing_2'.format(
+                    os.getenv('TAP_WORKDAY_RAAS_HOSTNAME', ''),
+                    os.getenv('TAP_WORKDAY_RAAS_TENANT', ''),
+                ),
+                'report_name': 'stitch_test_report',
+            }]),
         }
 
     def test_run(self):
@@ -77,7 +95,7 @@ class WorkdayRaasSync(unittest.TestCase):
         menagerie.verify_sync_exit_status(self, exit_status, sync_job_name)
 
         # This should be validating the the PKs are written in each record
-        
+
         record_count_by_stream = runner.examine_target_output_file(self, conn_id, self.expected_sync_streams(), self.expected_pks())
         replicated_row_count =  reduce(lambda accum,c : accum + c, record_count_by_stream.values())
         self.assertGreater(replicated_row_count, 0, msg="failed to replicate any data: {}".format(record_count_by_stream))

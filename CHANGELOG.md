@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.0
+  * Adds OAuth 2.0 authentication support and removes existing username/password authentication [#32](https://github.com/singer-io/tap-workday-raas/pull/32)
+
 ## 1.2.1
   * Makes JSON fields nullable and adds tests. Updates requests, ijson and singer-python versions [#29](https://github.com/singer-io/tap-workday-raas/pull/29)
   * Validation for duplicate report name
