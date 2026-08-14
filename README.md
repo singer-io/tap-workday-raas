@@ -26,19 +26,42 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
    ```
 ## Create Config
 
-   Create your tap's `config.json` file.  The tap config file for this tap should include these entries:
+   Create your tap's `config.json` file.  The tap authenticates to Workday using
+   OAuth 2.0.  You must complete the OAuth authorization flow externally (e.g.
+   using the Workday authorization endpoint) to obtain an initial access token and
+   refresh token before running the tap.
 
-   - `username` - The username of the workday account with access to the reports to extract
-   - `password` - The password of the workday account with access to the reports to extract
-   - `reports` -  A JSON string containing a list of objects containing the `report_name` and `report_url`. `report_name` is the name of the stream for the report, and the `report_url` is the URL to the Workday XML REST link for the report you wish to extract.
+   Required fields:
+
+   - `tenant` – The name of the Workday tenant.
+   - `hostname` – The Workday hostname used for API requests.
+   - `client_id` – The OAuth client ID registered in Workday.
+   - `client_secret` – The OAuth client secret registered in Workday.
+   - `refresh_token` – A valid OAuth refresh token obtained from the authorization flow.
+   - `reports` – A JSON string containing a list of objects, each with a `report_name`
+     and `report_url`.  `report_name` is used as the Singer stream name.
 
    ```json
    {
-       "username": "<username>",
-       "password": "<password>",
-       "reports": "[{\"report_name\": \"abitrary_name\", \"report_url\": \"https://...\"}, ...]"
+       "tenant": "<TENANT>",
+       "hostname": "<WORKDAY_HOSTNAME>",
+       "client_id": "<CLIENT_ID>",
+       "client_secret": "<CLIENT_SECRET>",
+       "refresh_token": "<REFRESH_TOKEN>",
+       "reports": "[{\"report_name\": \"my_report\", \"report_url\": \"https://...\"}]"
    }
    ```
+
+   ### Token refresh behaviour
+
+   The tap uses the configured `refresh_token` to obtain an access token from the Workday OAuth token endpoint. The access token is then used as a Bearer token for Workday RaaS and XSD requests.
+
+   If Workday rejects a request with HTTP 401 or 403, the tap automatically refreshes the access token and retries the request once.
+
+   Workday may return a new `refresh_token` when an access token is refreshed. When this occurs, the tap updates the in-memory refresh token and persists the new refresh token to `config.json` so that subsequent tap processes continue to use the current refresh token.
+
+   > **Note:** `username` and `password` are no longer required or supported.
+   > Basic Authentication has been removed.
 
 ## Run Discovery
 

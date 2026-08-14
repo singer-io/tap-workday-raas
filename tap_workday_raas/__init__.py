@@ -4,16 +4,24 @@ import singer
 
 from singer import metadata
 from singer import utils
+from tap_workday_raas.client import WorkdayOAuthClient
 from tap_workday_raas.discover import discover_streams
 from tap_workday_raas.sync import sync_report
 
-REQUIRED_CONFIG_KEYS = ["username", "password", "reports"]
+REQUIRED_CONFIG_KEYS = [
+    "tenant",
+    "hostname",
+    "client_id",
+    "client_secret",
+    "refresh_token",
+    "reports",
+]
 LOGGER = singer.get_logger()
 
 
-def do_discover(config):
+def do_discover(config, auth_client):
     LOGGER.info("Starting discover")
-    streams = discover_streams(config)
+    streams = discover_streams(config, auth_client)
     if not streams:
         raise Exception("No streams found")
     catalog = {"streams": streams}
@@ -21,11 +29,7 @@ def do_discover(config):
     LOGGER.info("Finished discover")
 
 
-def stream_is_selected(mdata):
-    return mdata.get((), {}).get("selected", False)
-
-
-def do_sync(config, catalog, state):
+def do_sync(config, catalog, state, auth_client):
     LOGGER.info("Starting sync.")
 
     reports = {report["report_name"]: report for report in json.loads(config["reports"])}
@@ -41,7 +45,7 @@ def do_sync(config, catalog, state):
         singer.write_schema(stream_name, stream.schema.to_dict(), key_properties)
 
         LOGGER.info("%s: Starting sync", stream_name)
-        counter_value = sync_report(report, stream, config)
+        counter_value = sync_report(report, stream, auth_client)
         LOGGER.info("%s: Completed sync (%s rows)", stream_name, counter_value)
 
     state = singer.set_currently_syncing(state, None)
@@ -53,10 +57,13 @@ def do_sync(config, catalog, state):
 def main():
     args = utils.parse_args(REQUIRED_CONFIG_KEYS)
 
-    if args.discover:
-        do_discover(args.config)
-    elif args.catalog or args.properties:
-        do_sync(args.config, args.catalog, args.state)
+    # Pass config_path so the OAuth token manager can persist rotated refresh tokens
+    # back to the config file for subsequent tap processes to read.
+    with WorkdayOAuthClient(args.config, config_path=args.config_path) as auth_client:
+        if args.discover:
+            do_discover(args.config, auth_client)
+        elif args.catalog or args.properties:
+            do_sync(args.config, args.catalog, args.state, auth_client)
 
 
 if __name__ == "__main__":

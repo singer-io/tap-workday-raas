@@ -1,7 +1,37 @@
+import time
 import unittest
 from unittest.mock import patch, MagicMock
 import requests
+
 from tap_workday_raas import discover
+from tap_workday_raas.client import WorkdayOAuthClient
+
+
+def _make_auth_client():
+    """Return a WorkdayOAuthClient with fake test credentials."""
+    client = WorkdayOAuthClient({
+        "access_token": "test-access-token",
+        "client_id": "test-client-id",
+        "client_secret": "test-client-secret",
+        "refresh_token": "test-refresh-token",
+        "hostname": "test.workday.com",
+        "tenant": "tenant",
+    })
+    client._access_token = "test-access-token"
+    client._expires_at = time.monotonic() + 86400
+    return client
+
+
+def _oauth_config(reports_json=None):
+    """Return an OAuth config dict with fake credentials."""
+    return {
+        "tenant": "test-tenant",
+        "hostname": "test.workday.com",
+        "client_id": "test-client-id",
+        "client_secret": "test-client-secret",
+        "refresh_token": "test-refresh-token",
+        "reports": reports_json or "[]",
+    }
 
 
 xsd = """<?xml version="1.0" encoding="UTF-8"?>
@@ -129,7 +159,7 @@ class TestEnrichSchemaFromData(unittest.TestCase):
             {"col_a": "v1", "col_b": 1, "col_c": "extra", "col_d": 99},
         ])
         schema = self._base_schema()
-        result = discover.enrich_schema_from_data(schema, "http://fake", "u", "p")
+        result = discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client())
 
         self.assertIn("col_c", result["properties"])
         self.assertEqual(result["properties"]["col_c"], {"type": ["string", "null"]})
@@ -143,7 +173,7 @@ class TestEnrichSchemaFromData(unittest.TestCase):
             {"col_a": 12345, "col_b": "string_value"},
         ])
         schema = self._base_schema()
-        result = discover.enrich_schema_from_data(schema, "http://fake", "u", "p")
+        result = discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client())
 
         # Original types should be preserved, not overwritten by inferred types
         self.assertEqual(result["properties"]["col_a"], {"type": ["string", "null"]})
@@ -157,7 +187,7 @@ class TestEnrichSchemaFromData(unittest.TestCase):
         ])
         schema = self._base_schema()
         original_props = dict(schema["properties"])
-        result = discover.enrich_schema_from_data(schema, "http://fake", "u", "p")
+        result = discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client())
 
         self.assertEqual(result["properties"], original_props)
 
@@ -167,7 +197,7 @@ class TestEnrichSchemaFromData(unittest.TestCase):
         mock_stream.side_effect = Exception("connection refused")
         schema = self._base_schema()
         original_props = dict(schema["properties"])
-        result = discover.enrich_schema_from_data(schema, "http://fake", "u", "p")
+        result = discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client())
 
         self.assertEqual(result["properties"], original_props)
 
@@ -177,7 +207,7 @@ class TestEnrichSchemaFromData(unittest.TestCase):
         mock_stream.return_value = iter([])
         schema = self._base_schema()
         original_props = dict(schema["properties"])
-        result = discover.enrich_schema_from_data(schema, "http://fake", "u", "p")
+        result = discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client())
 
         self.assertEqual(result["properties"], original_props)
 
@@ -190,7 +220,7 @@ class TestEnrichSchemaFromData(unittest.TestCase):
             {"col_a": "v3", "col_d": 100},
         ])
         schema = self._base_schema()
-        result = discover.enrich_schema_from_data(schema, "http://fake", "u", "p")
+        result = discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client())
 
         self.assertIn("col_c", result["properties"])
         self.assertIn("col_d", result["properties"])
@@ -203,7 +233,7 @@ class TestEnrichSchemaFromData(unittest.TestCase):
             {"col_a": "v2", "col_new": 42},
         ])
         schema = self._base_schema()
-        result = discover.enrich_schema_from_data(schema, "http://fake", "u", "p")
+        result = discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client())
 
         self.assertIn("col_new", result["properties"])
         self.assertEqual(result["properties"]["col_new"], {"type": ["number", "null"]})
@@ -220,7 +250,7 @@ class TestEnrichSchemaFromData(unittest.TestCase):
         mock_stream.return_value = counting_iter()
         schema = self._base_schema()
 
-        discover.enrich_schema_from_data(schema, "http://fake", "u", "p", sample_size=5)
+        discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client(), sample_size=5)
 
         self.assertEqual(len(consumed), 5, "Should consume exactly sample_size records")
 
@@ -229,7 +259,7 @@ class TestEnrichSchemaFromData(unittest.TestCase):
         """When sample_size is 0, no records should be fetched and schema is unchanged."""
         schema = self._base_schema()
         original_props = dict(schema["properties"])
-        result = discover.enrich_schema_from_data(schema, "http://fake", "u", "p", sample_size=0)
+        result = discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client(), sample_size=0)
 
         mock_stream.assert_not_called()
         self.assertEqual(result["properties"], original_props)
@@ -246,11 +276,14 @@ class TestDiscoverStreamsEnrichment(unittest.TestCase):
         mock_enrich.side_effect = lambda schema, *a, **kw: schema
 
         config = {
-            "username": "user",
-            "password": "pass",
+            "tenant": "test-tenant",
+            "hostname": "test.workday.com",
+            "client_id": "test-client-id",
+            "client_secret": "test-client-secret",
+            "refresh_token": "test-refresh-token",
             "reports": '[{"report_url": "http://fake", "report_name": "test_report"}]',
         }
-        discover.discover_streams(config)
+        discover.discover_streams(config, _make_auth_client())
         mock_enrich.assert_called_once()
 
 
@@ -269,8 +302,11 @@ class TestDiscoverStreamsDuplicateReportNames(unittest.TestCase):
     def _config(self, reports):
         import json
         return {
-            "username": "user",
-            "password": "pass",
+            "tenant": "test-tenant",
+            "hostname": "test.workday.com",
+            "client_id": "test-client-id",
+            "client_secret": "test-client-secret",
+            "refresh_token": "test-refresh-token",
             "reports": json.dumps(reports),
         }
 
@@ -281,7 +317,7 @@ class TestDiscoverStreamsDuplicateReportNames(unittest.TestCase):
             {"report_url": "http://fake/r2", "report_name": "my_report"},
         ])
         with self.assertRaises(ValueError) as ctx:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
 
         self.assertIn("my_report", str(ctx.exception))
 
@@ -294,7 +330,7 @@ class TestDiscoverStreamsDuplicateReportNames(unittest.TestCase):
             {"report_url": "http://fake/r4", "report_name": "report_b"},
         ])
         with self.assertRaises(ValueError) as ctx:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
 
         error_msg = str(ctx.exception)
         self.assertIn("report_a", error_msg)
@@ -314,7 +350,7 @@ class TestDiscoverStreamsDuplicateReportNames(unittest.TestCase):
                 {"report_url": "http://fake/r2", "report_name": "report_y"},
             ])
             # Should not raise
-            streams = discover.discover_streams(config)
+            streams = discover.discover_streams(config, _make_auth_client())
             stream_names = [s["tap_stream_id"] for s in streams]
             self.assertIn("report_x", stream_names)
             self.assertIn("report_y", stream_names)
@@ -326,8 +362,11 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
     def _config(self, reports):
         import json
         return {
-            "username": "user",
-            "password": "pass",
+            "tenant": "test-tenant",
+            "hostname": "test.workday.com",
+            "client_id": "test-client-id",
+            "client_secret": "test-client-secret",
+            "refresh_token": "test-refresh-token",
             "reports": json.dumps(reports),
         }
 
@@ -342,7 +381,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/r1", "report_name": "report_1"},
             {"report_url": "http://fake/r2", "report_name": "report_2"},
         ])
-        streams = discover.discover_streams(config)
+        streams = discover.discover_streams(config, _make_auth_client())
 
         self.assertEqual(len(streams), 2)
         stream_ids = [s["tap_stream_id"] for s in streams]
@@ -359,7 +398,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/r1", "report_name": "report_1"},
         ])
         with self.assertRaises(Exception) as ctx:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
 
         self.assertIn("500", str(ctx.exception))
 
@@ -373,7 +412,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/secret_report", "report_name": "secret_report"},
         ])
         with self.assertRaises(Exception) as ctx:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
 
         error_msg = str(ctx.exception)
         self.assertIn("secret_report", error_msg)
@@ -389,7 +428,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/r1", "report_name": "report_1"},
         ])
         with self.assertRaises(Exception) as ctx:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
 
         self.assertIn("The report does not exist.", str(ctx.exception))
 
@@ -408,7 +447,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/r2", "report_name": "report_2"},
         ])
         with self.assertRaises(Exception) as ctx:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
 
         # The exception should only mention the failed report
         error_msg = str(ctx.exception)
@@ -431,7 +470,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
         ])
 
         try:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
         except Exception:
             pass  # expected – but we can't check streams since it raises not returns
 
@@ -452,7 +491,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/r2", "report_name": "report_2"},
         ])
         with self.assertRaises(Exception) as ctx:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
 
         error_msg = str(ctx.exception)
         self.assertIn("report_1", error_msg)
@@ -469,7 +508,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/r1", "report_name": "report_1"},
         ])
         with self.assertRaises(Exception) as ctx:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
 
         error_msg = str(ctx.exception)
         self.assertIn("report_1", error_msg)
@@ -485,7 +524,7 @@ class TestDiscoverStreamsErrorHandling(unittest.TestCase):
             {"report_url": "http://fake/r1", "report_name": "report_1"},
         ])
         with self.assertRaises(Exception) as ctx:
-            discover.discover_streams(config)
+            discover.discover_streams(config, _make_auth_client())
 
         error_msg = str(ctx.exception)
         self.assertIn("report_1", error_msg)
