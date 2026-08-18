@@ -1,3 +1,4 @@
+import base64
 import json
 import time
 import requests
@@ -77,7 +78,12 @@ class WorkdayOAuthClient:
                 "OAuth token request failed (HTTP {}).".format(resp.status_code)
             )
 
-        token_data = resp.json()
+        try:
+            token_data = resp.json()
+        except ValueError as exc:
+            raise WorkdayRaasAuthenticationError(
+                "Token endpoint returned a non-JSON response during refresh."
+            ) from exc
         new_token = token_data.get("access_token")
         if not new_token:
             raise WorkdayRaasAuthenticationError(
@@ -136,6 +142,68 @@ class WorkdayOAuthClient:
         return resp
 
 
+class WorkdayBasicAuthClient:
+    """Authenticates Workday RaaS requests using HTTP Basic auth (username + password).
+
+    Used for existing connections configured before OAuth support was added.
+    Implements the same interface as WorkdayOAuthClient so both can be used
+    interchangeably by stream_report, download_xsd, and discover_streams.
+    """
+
+    def __init__(self, config):
+        self.config = config
+        self._username = config["username"]
+        self._password = config["password"]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        pass
+
+    def _auth_headers(self):
+        credentials = base64.b64encode(
+            "{}:{}".format(self._username, self._password).encode()
+        ).decode()
+        return {"Authorization": "Basic {}".format(credentials)}
+
+    def _refresh_access_token(self) -> None:
+        """No-op: basic auth credentials are static and do not require refresh."""
+        pass
+
+    def get(self, url, **kwargs):
+        """Make an authenticated GET request."""
+        return requests.get(url, headers=self._auth_headers(), **kwargs)
+
+
+_OAUTH_REQUIRED_KEYS = ("hostname", "tenant", "client_id", "client_secret", "refresh_token")
+
+
+def create_auth_client(config, config_path=None):
+    """Return the appropriate auth client based on the config keys present.
+
+    OAuth mode is selected only when ALL required OAuth keys are present:
+    ``hostname``, ``tenant``, ``client_id``, ``client_secret``, ``refresh_token``.
+
+    Basic auth mode is selected when both ``username`` and ``password`` are present.
+    """
+    has_oauth = all(config.get(k) for k in _OAUTH_REQUIRED_KEYS)
+    has_basic = config.get("username") and config.get("password")
+
+    if has_oauth:
+        return WorkdayOAuthClient(config, config_path)
+    if has_basic:
+        return WorkdayBasicAuthClient(config)
+
+    missing_oauth = [k for k in _OAUTH_REQUIRED_KEYS if not config.get(k)]
+    raise WorkdayRaasAuthenticationError(
+        "Config must contain either all OAuth keys ({}) or basic auth keys "
+        "(username, password). Missing OAuth keys: {}.".format(
+            ", ".join(_OAUTH_REQUIRED_KEYS), missing_oauth
+        )
+    )
+
+
 def stream_report(report_url, auth_client):
     # Force the format query param to be set to format=json
 
@@ -161,7 +229,7 @@ def stream_report(report_url, auth_client):
     def _open_stream():
         return requests.get(
             corrected_url,
-            headers={"Authorization": "Bearer {}".format(auth_client.get_access_token())},
+            headers=auth_client._auth_headers(),
             stream=True,
         )
 

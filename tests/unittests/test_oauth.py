@@ -1,3 +1,4 @@
+import base64
 import json
 import time
 import unittest
@@ -5,7 +6,11 @@ from unittest.mock import patch, MagicMock, mock_open
 
 import requests
 
-from tap_workday_raas.client import WorkdayOAuthClient, stream_report, download_xsd
+from tap_workday_raas.client import (
+    WorkdayOAuthClient, WorkdayBasicAuthClient, create_auth_client,
+    stream_report, download_xsd,
+)
+from tap_workday_raas.exceptions import WorkdayRaasAuthenticationError
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +312,18 @@ class TestRefreshAccessToken(unittest.TestCase):
             WorkdayOAuthClient(_oauth_config())._refresh_access_token()
         self.assertIn("access_token", str(ctx.exception))
 
+    @patch("tap_workday_raas.client.requests.post")
+    def test_non_json_token_response_raises_authentication_error(self, mock_post):
+        """A non-JSON token endpoint response must raise WorkdayRaasAuthenticationError."""
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.status_code = 200
+        mock_resp.json.side_effect = ValueError("No JSON object could be decoded")
+        mock_post.return_value = mock_resp
+        with self.assertRaises(WorkdayRaasAuthenticationError) as ctx:
+            WorkdayOAuthClient(_oauth_config())._refresh_access_token()
+        self.assertIn("non-JSON", str(ctx.exception))
+
 
 # ---------------------------------------------------------------------------
 # Refresh token rotation
@@ -590,3 +607,154 @@ class TestTokensNotLogged(unittest.TestCase):
         err = str(ctx.exception)
         self.assertNotIn("test-client-secret", err)
         self.assertNotIn("test-refresh-token", err)
+
+
+# ---------------------------------------------------------------------------
+# WorkdayBasicAuthClient
+# ---------------------------------------------------------------------------
+
+def _basic_config(extra=None):
+    cfg = {
+        "username": "test-user",
+        "password": "test-pass",
+        "reports": "[]",
+    }
+    if extra:
+        cfg.update(extra)
+    return cfg
+
+
+class TestWorkdayBasicAuthClient(unittest.TestCase):
+    """WorkdayBasicAuthClient uses HTTP Basic auth for all requests."""
+
+    def test_construction_stores_credentials(self):
+        client = WorkdayBasicAuthClient(_basic_config())
+        self.assertEqual(client._username, "test-user")
+        self.assertEqual(client._password, "test-pass")
+
+    def test_enter_returns_self(self):
+        client = WorkdayBasicAuthClient(_basic_config())
+        self.assertIs(client.__enter__(), client)
+
+    def test_exit_does_not_raise(self):
+        WorkdayBasicAuthClient(_basic_config()).__exit__(None, None, None)
+
+    def test_auth_headers_use_basic_scheme(self):
+        client = WorkdayBasicAuthClient(_basic_config())
+        headers = client._auth_headers()
+        self.assertTrue(headers["Authorization"].startswith("Basic "))
+
+    def test_auth_headers_encode_username_password(self):
+        client = WorkdayBasicAuthClient(_basic_config())
+        headers = client._auth_headers()
+        encoded = headers["Authorization"].split(" ", 1)[1]
+        decoded = base64.b64decode(encoded).decode()
+        self.assertEqual(decoded, "test-user:test-pass")
+
+    def test_auth_headers_no_bearer(self):
+        client = WorkdayBasicAuthClient(_basic_config())
+        self.assertNotIn("Bearer", client._auth_headers()["Authorization"])
+
+    def test_refresh_access_token_is_noop(self):
+        """_refresh_access_token must not raise and must not make any HTTP call."""
+        with patch("tap_workday_raas.client.requests.post") as mock_post:
+            WorkdayBasicAuthClient(_basic_config())._refresh_access_token()
+            mock_post.assert_not_called()
+
+    def test_refresh_access_token_does_not_raise_on_repeated_calls(self):
+        """Calling _refresh_access_token multiple times must stay a no-op."""
+        client = WorkdayBasicAuthClient(_basic_config())
+        client._refresh_access_token()
+        client._refresh_access_token()  # second call must also succeed silently
+
+    @patch("tap_workday_raas.client.requests.get")
+    def test_get_sends_basic_auth_header(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_get.return_value = mock_resp
+        client = WorkdayBasicAuthClient(_basic_config())
+        client.get("http://fake")
+        headers = mock_get.call_args[1]["headers"]
+        self.assertTrue(headers["Authorization"].startswith("Basic "))
+
+
+# ---------------------------------------------------------------------------
+# create_auth_client factory
+# ---------------------------------------------------------------------------
+
+class TestCreateAuthClientFactory(unittest.TestCase):
+    """create_auth_client returns the right client type based on config."""
+
+    def test_returns_oauth_client_for_complete_oauth_config(self):
+        cfg = {
+            "hostname": "test.workday.com",
+            "tenant": "mytenant",
+            "client_id": "cid",
+            "client_secret": "csecret",
+            "refresh_token": "rt",
+        }
+        client = create_auth_client(cfg)
+        self.assertIsInstance(client, WorkdayOAuthClient)
+
+    def test_partial_oauth_config_raises_authentication_error(self):
+        """Only some OAuth keys present — must raise, not silently use OAuth."""
+        cfg = {
+            "hostname": "test.workday.com",
+            "client_id": "cid",
+            # missing tenant, client_secret, refresh_token
+        }
+        with self.assertRaises(WorkdayRaasAuthenticationError):
+            create_auth_client(cfg)
+
+    def test_partial_basic_config_raises_authentication_error(self):
+        """Only username without password — must raise."""
+        with self.assertRaises(WorkdayRaasAuthenticationError):
+            create_auth_client({"username": "user"})
+
+    def test_no_auth_config_raises_authentication_error(self):
+        """Empty config — must raise, not proceed silently."""
+        with self.assertRaises(WorkdayRaasAuthenticationError):
+            create_auth_client({})
+
+    def test_returns_basic_auth_client_when_username_password_present(self):
+        cfg = {"username": "user", "password": "pass", "reports": "[]"}
+        client = create_auth_client(cfg)
+        self.assertIsInstance(client, WorkdayBasicAuthClient)
+
+    def test_passes_config_path_to_oauth_client(self):
+        cfg = {
+            "hostname": "test.workday.com",
+            "tenant": "t",
+            "client_id": "cid",
+            "client_secret": "csecret",
+            "refresh_token": "rt",
+        }
+        client = create_auth_client(cfg, config_path="/tmp/config.json")
+        self.assertIsInstance(client, WorkdayOAuthClient)
+        self.assertEqual(client._config_path, "/tmp/config.json")
+
+
+# ---------------------------------------------------------------------------
+# stream_report with basic auth
+# ---------------------------------------------------------------------------
+
+class TestStreamReportBasicAuth(unittest.TestCase):
+    """stream_report sends Basic auth header when using WorkdayBasicAuthClient."""
+
+    @patch("tap_workday_raas.client.requests.get")
+    def test_basic_auth_header_in_report_request(self, mock_get):
+        body = json.dumps({"Report_Entry": [{"col": "val"}]}).encode()
+        mock_get.return_value = _make_ok_streaming_response(body)
+        client = WorkdayBasicAuthClient(_basic_config())
+        list(stream_report("http://fake", client))
+        headers = mock_get.call_args[1].get("headers", {})
+        self.assertTrue(headers.get("Authorization", "").startswith("Basic "))
+
+    @patch("tap_workday_raas.client.requests.get")
+    def test_no_bearer_in_basic_auth_report_request(self, mock_get):
+        body = json.dumps({"Report_Entry": []}).encode()
+        mock_get.return_value = _make_ok_streaming_response(body)
+        client = WorkdayBasicAuthClient(_basic_config())
+        list(stream_report("http://fake", client))
+        headers = mock_get.call_args[1].get("headers", {})
+        self.assertNotIn("Bearer", headers.get("Authorization", ""))

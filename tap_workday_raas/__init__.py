@@ -4,19 +4,37 @@ import singer
 
 from singer import metadata
 from singer import utils
-from tap_workday_raas.client import WorkdayOAuthClient
+from tap_workday_raas.client import create_auth_client
 from tap_workday_raas.discover import discover_streams
+from tap_workday_raas.exceptions import WorkdayRaasAuthenticationError
 from tap_workday_raas.sync import sync_report
 
-REQUIRED_CONFIG_KEYS = [
-    "tenant",
-    "hostname",
-    "client_id",
-    "client_secret",
-    "refresh_token",
-    "reports",
-]
+# Only `reports` is required for both auth modes.
+# OAuth mode: hostname, tenant, client_id, client_secret, refresh_token
+# Basic auth mode: username, password
+REQUIRED_CONFIG_KEYS = ["reports"]
 LOGGER = singer.get_logger()
+
+_OAUTH_KEYS = {"hostname", "tenant", "client_id", "client_secret", "refresh_token"}
+_BASIC_AUTH_KEYS = {"username", "password"}
+
+
+def _validate_auth_config(config):
+    """Raise a clear error if neither a complete OAuth nor basic-auth config is present."""
+    has_oauth = all(config.get(k) for k in _OAUTH_KEYS)
+    has_basic = all(config.get(k) for k in _BASIC_AUTH_KEYS)
+    if not has_oauth and not has_basic:
+        missing_oauth = sorted(k for k in _OAUTH_KEYS if not config.get(k))
+        missing_basic = sorted(k for k in _BASIC_AUTH_KEYS if not config.get(k))
+        raise WorkdayRaasAuthenticationError(
+            "Config must contain either OAuth keys ({}) or basic auth keys ({}). "
+            "Missing OAuth keys: {}. Missing basic auth keys: {}.".format(
+                ", ".join(sorted(_OAUTH_KEYS)),
+                ", ".join(sorted(_BASIC_AUTH_KEYS)),
+                missing_oauth,
+                missing_basic,
+            )
+        )
 
 
 def do_discover(config, auth_client):
@@ -56,10 +74,10 @@ def do_sync(config, catalog, state, auth_client):
 @singer.utils.handle_top_exception(LOGGER)
 def main():
     args = utils.parse_args(REQUIRED_CONFIG_KEYS)
+    _validate_auth_config(args.config)
 
-    # Pass config_path so the OAuth token manager can persist rotated refresh tokens
-    # back to the config file for subsequent tap processes to read.
-    with WorkdayOAuthClient(args.config, config_path=args.config_path) as auth_client:
+    config_path = getattr(args, "config_path", None)
+    with create_auth_client(args.config, config_path) as auth_client:
         if args.discover:
             do_discover(args.config, auth_client)
         elif args.catalog or args.properties:
