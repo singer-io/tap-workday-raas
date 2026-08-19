@@ -99,18 +99,23 @@ class WorkdayOAuthClient:
         if new_refresh_token:
             self._refresh_token = new_refresh_token
             self.config["refresh_token"] = new_refresh_token
-            self._persist_config()
+            self._write_config(token_data)
 
         LOGGER.info("OAuth access token refreshed successfully.")
 
-    def _persist_config(self) -> None:
-        """Write the current config (including rotated refresh_token) back to disk."""
+    def _write_config(self, token) -> None:
+        """Write the rotated refresh_token (and access_token) back to the config file.
+        """
         if not self._config_path:
             LOGGER.debug("No config_path set; skipping refresh token persistence to disk")
             return
         try:
-            with open(self._config_path, "w") as fh:
-                json.dump(self.config, fh, indent=2)
+            with open(self._config_path, encoding="utf-8") as fh:
+                config = json.load(fh)
+            config["refresh_token"] = token["refresh_token"]
+            config["access_token"] = token.get("access_token", "")
+            with open(self._config_path, "w", encoding="utf-8") as fh:
+                json.dump(config, fh, indent=2)
             LOGGER.debug("Persisted rotated refresh token to %s", self._config_path)
         except OSError as exc:
             LOGGER.warning("Failed to persist rotated refresh token: %s", exc)

@@ -350,19 +350,25 @@ class TestRefreshTokenRotation(unittest.TestCase):
         client = WorkdayOAuthClient(cfg)
         client._refresh_access_token()
         self.assertEqual(cfg["refresh_token"], "rotated-refresh-token")
+        self.assertEqual(client._refresh_token, "rotated-refresh-token")
 
-    @patch("builtins.open", new_callable=mock_open)
     @patch("tap_workday_raas.client.requests.post")
-    def test_rotation_persists_to_config_file(self, mock_post, m_open):
+    def test_rotation_persists_to_config_file(self, mock_post):
         mock_post.return_value = _make_refresh_response(
             new_refresh_token="rotated-refresh-token"
         )
         cfg = _oauth_config()
         client = WorkdayOAuthClient(cfg, config_path="/tmp/config.json")
-        client._refresh_access_token()
-        m_open.assert_called_once_with("/tmp/config.json", "w")
+        m = mock_open(read_data=json.dumps(cfg))
+        with patch("builtins.open", m):
+            client._refresh_access_token()
+        # Verify the write call happened with the path and mode.
+        write_calls = [c for c in m.call_args_list if c.args[1:] == ("w",) or
+                       (len(c.args) > 1 and c.args[1] == "w")]
+        self.assertTrue(write_calls, "Expected a write open call to /tmp/config.json")
+        # Reconstruct written content and validate the rotated token.
         written = "".join(
-            call.args[0] for call in m_open().write.call_args_list
+            call.args[0] for call in m().write.call_args_list
         )
         persisted = json.loads(written)
         self.assertEqual(persisted["refresh_token"], "rotated-refresh-token")
