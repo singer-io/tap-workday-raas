@@ -9,18 +9,48 @@ from tap_workday_raas.discover import discover_streams
 from tap_workday_raas.exceptions import WorkdayRaasAuthenticationError
 from tap_workday_raas.sync import sync_report
 
-# Only `reports` is required for both auth modes.
-# OAuth mode: hostname, tenant, client_id, client_secret, refresh_token
+# Only `reports` is required at the Singer tap argument level.
+# authorization_code mode: hostname, tenant, client_id, client_secret, refresh_token
+# client_credentials mode: hostname, tenant, client_id, client_secret
 # Basic auth mode: username, password
 REQUIRED_CONFIG_KEYS = ["reports"]
 LOGGER = singer.get_logger()
 
 _OAUTH_KEYS = {"hostname", "tenant", "client_id", "client_secret", "refresh_token"}
+_CLIENT_CREDENTIALS_KEYS = {"hostname", "tenant", "client_id", "client_secret"}
 _BASIC_AUTH_KEYS = {"username", "password"}
 
 
 def _validate_auth_config(config):
-    """Raise a clear error if neither a complete OAuth nor basic-auth config is present."""
+    """Raise a clear error if the config doesn't satisfy whichever auth mode
+    auth_method selects.
+
+    For configs that pre-date the auth_method field (legacy connections),
+    fall back to requiring either a complete authorization_code-style OAuth
+    config or a complete basic-auth config.
+    """
+    auth_method = config.get("auth_method")
+
+    if auth_method == "client_credentials":
+        missing = sorted(k for k in _CLIENT_CREDENTIALS_KEYS if not config.get(k))
+        if missing:
+            raise WorkdayRaasAuthenticationError(
+                "auth_method is 'client_credentials' but config is missing "
+                "required keys: {}.".format(missing)
+            )
+        return
+
+    if auth_method == "authorization_code":
+        missing = sorted(k for k in _OAUTH_KEYS if not config.get(k))
+        if missing:
+            raise WorkdayRaasAuthenticationError(
+                "auth_method is 'authorization_code' but config is missing "
+                "required keys: {}.".format(missing)
+            )
+        return
+
+    # Legacy configs predating auth_method: accept a complete OAuth
+    # (authorization_code-style) config or a complete basic-auth config.
     has_oauth = all(config.get(k) for k in _OAUTH_KEYS)
     has_basic = all(config.get(k) for k in _BASIC_AUTH_KEYS)
     if not has_oauth and not has_basic:

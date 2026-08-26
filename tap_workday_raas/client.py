@@ -15,7 +15,8 @@ _EXPIRY_BUFFER_SECS = 60  # refresh proactively 60 s before actual expiry
 
 
 class WorkdayOAuthClient:
-    """Manages OAuth 2.0 token lifecycle for Workday RaaS requests.
+    """Manages OAuth 2.0 token lifecycle for Workday RaaS requests using the
+    ``authorization_code`` grant (refresh_token exchange).
 
       - Token endpoint is derived from ``hostname`` + ``tenant`` when
         ``token_endpoint`` is not explicitly provided.
@@ -68,15 +69,24 @@ class WorkdayOAuthClient:
                 "OAuth token request failed (network error): {}".format(exc)
             ) from exc
 
-        if resp.status_code == 401:
-            raise WorkdayRaasAuthenticationError(
-                "OAuth token request rejected (HTTP 401): "
-                "verify client_id, client_secret, and refresh_token in the tap config."
-            )
         if not resp.ok:
-            raise WorkdayRaasAuthenticationError(
-                "OAuth token request failed (HTTP {}).".format(resp.status_code)
-            )
+            try:
+                error_data = resp.json()
+                error_detail = (
+                    error_data.get("error_description")
+                    or error_data.get("error")
+                )
+            except ValueError:
+                error_detail = None
+            message = "OAuth token request failed (HTTP {})".format(resp.status_code)
+            if resp.status_code == 401:
+                message = (
+                    "OAuth token request rejected (HTTP 401): "
+                    "verify client_id, client_secret, and refresh_token in the tap config."
+                )
+            if error_detail:
+                message += ": {}".format(error_detail)
+            raise WorkdayRaasAuthenticationError(message)
 
         try:
             token_data = resp.json()
@@ -147,6 +157,117 @@ class WorkdayOAuthClient:
         return resp
 
 
+class WorkdayClientCredentialsAuthClient:
+    """Manages OAuth 2.0 token lifecycle for Workday RaaS requests using the
+    ``client_credentials`` grant.
+
+    Unlike ``WorkdayOAuthClient``, this grant type has no refresh token: a new
+    access token is requested directly from the token endpoint using
+    ``client_id``/``client_secret`` (HTTP Basic auth) whenever the current
+    token is missing, expired, or rejected. There is nothing to persist back
+    to the config file.
+
+    Implements the same interface as ``WorkdayOAuthClient`` /
+    ``WorkdayBasicAuthClient`` so it can be used interchangeably by
+    ``stream_report``, ``download_xsd``, and ``discover_streams``.
+    """
+
+    def __init__(self, config):
+        self.config = config
+        self._token_endpoint = config.get("token_endpoint") or (
+            "https://{}/ccx/oauth2/{}/token".format(
+                config["hostname"], config["tenant"]
+            )
+        )
+        self._client_id = config["client_id"]
+        self._client_secret = config["client_secret"]
+        self._access_token = None
+        self._expires_at = 0.0
+
+    def __enter__(self):
+        self._refresh_access_token()
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        pass  # no persistent session to close
+
+    def _refresh_access_token(self) -> None:
+        """Request a new access token using the client_credentials grant."""
+        LOGGER.info("Requesting OAuth access token via client credentials grant")
+        try:
+            resp = requests.post(
+                self._token_endpoint,
+                auth=(self._client_id, self._client_secret),
+                data={"grant_type": "client_credentials"},
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            raise WorkdayRaasAuthenticationError(
+                "OAuth token request failed (network error): {}".format(exc)
+            ) from exc
+        if not resp.ok:
+            try:
+                error_data = resp.json()
+                error_detail = (
+                    error_data.get("error_description")
+                    or error_data.get("error")
+                )
+            except ValueError:
+                error_detail = None
+            message = "OAuth token request failed (HTTP {})".format(resp.status_code)
+            if resp.status_code == 401:
+                message = (
+                    "OAuth token request rejected (HTTP 401): "
+                    "verify client_id and client_secret in the tap config."
+                )
+            if error_detail:
+                message += ": {}".format(error_detail)
+            raise WorkdayRaasAuthenticationError(message)
+
+        try:
+            token_data = resp.json()
+        except ValueError as exc:
+            raise WorkdayRaasAuthenticationError(
+                "Token endpoint returned a non-JSON response during token request."
+            ) from exc
+        new_token = token_data.get("access_token")
+        if not new_token:
+            raise WorkdayRaasAuthenticationError(
+                "Token endpoint response is missing the 'access_token' field."
+            )
+
+        expires_in = int(token_data.get("expires_in", 3600))
+        self._access_token = new_token
+        self._expires_at = time.monotonic() + expires_in
+        LOGGER.info("OAuth access token obtained successfully (client_credentials grant).")
+
+    def get_access_token(self) -> str:
+        """Return a valid access token, refreshing proactively when near expiry."""
+        if (
+            self._access_token
+            and time.monotonic() < self._expires_at - _EXPIRY_BUFFER_SECS
+        ):
+            return self._access_token
+        self._refresh_access_token()
+        return self._access_token
+
+    def _auth_headers(self):
+        return {"Authorization": "Bearer {}".format(self.get_access_token())}
+
+    def get(self, url, **kwargs):
+        """Make an authenticated GET request, retrying once on 401/403."""
+        resp = requests.get(url, headers=self._auth_headers(), **kwargs)
+        if resp.status_code in _AUTH_FAILURE_CODES:
+            resp.close()
+            LOGGER.info(
+                "Access token rejected (HTTP %s). Attempting token refresh.",
+                resp.status_code,
+            )
+            self._refresh_access_token()
+            resp = requests.get(url, headers=self._auth_headers(), **kwargs)
+        return resp
+
+
 class WorkdayBasicAuthClient:
     """Authenticates Workday RaaS requests using HTTP Basic auth (username + password).
 
@@ -182,16 +303,40 @@ class WorkdayBasicAuthClient:
 
 
 _OAUTH_REQUIRED_KEYS = ("hostname", "tenant", "client_id", "client_secret", "refresh_token")
+_CLIENT_CREDENTIALS_REQUIRED_KEYS = ("hostname", "tenant", "client_id", "client_secret")
 
 
 def create_auth_client(config, config_path=None):
-    """Return the appropriate auth client based on the config keys present.
+    """Return the appropriate auth client for the config's auth_method.
 
-    OAuth mode is selected only when ALL required OAuth keys are present:
-    ``hostname``, ``tenant``, ``client_id``, ``client_secret``, ``refresh_token``.
-
-    Basic auth mode is selected when both ``username`` and ``password`` are present.
+    - auth_method == "client_credentials": requires hostname, tenant,
+      client_id, client_secret. No refresh_token is used or required.
+    - auth_method == "authorization_code": requires hostname, tenant,
+      client_id, client_secret, refresh_token.
+    - No auth_method set (legacy connections predating this field): falls
+      back to whichever complete credential set is present -- full OAuth
+      keys, or username + password (HTTP Basic).
     """
+    auth_method = config.get("auth_method")
+
+    if auth_method == "client_credentials":
+        missing = [k for k in _CLIENT_CREDENTIALS_REQUIRED_KEYS if not config.get(k)]
+        if missing:
+            raise WorkdayRaasAuthenticationError(
+                "auth_method is 'client_credentials' but config is missing "
+                "required keys: {}.".format(missing)
+            )
+        return WorkdayClientCredentialsAuthClient(config)
+
+    if auth_method == "authorization_code":
+        missing = [k for k in _OAUTH_REQUIRED_KEYS if not config.get(k)]
+        if missing:
+            raise WorkdayRaasAuthenticationError(
+                "auth_method is 'authorization_code' but config is missing "
+                "required keys: {}.".format(missing)
+            )
+        return WorkdayOAuthClient(config, config_path)
+
     has_oauth = all(config.get(k) for k in _OAUTH_REQUIRED_KEYS)
     has_basic = config.get("username") and config.get("password")
 
@@ -202,9 +347,10 @@ def create_auth_client(config, config_path=None):
 
     missing_oauth = [k for k in _OAUTH_REQUIRED_KEYS if not config.get(k)]
     raise WorkdayRaasAuthenticationError(
-        "Config must contain either all OAuth keys ({}) or basic auth keys "
-        "(username, password). Missing OAuth keys: {}.".format(
-            ", ".join(_OAUTH_REQUIRED_KEYS), missing_oauth
+        "Config must specify a valid auth_method ('authorization_code' or "
+        "'client_credentials') along with its required keys, or provide "
+        "basic auth keys (username, password). Missing OAuth keys: {}.".format(
+            missing_oauth
         )
     )
 
