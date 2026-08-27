@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock, mock_open
 
 import requests
 
+from tap_workday_raas import _validate_auth_config
 from tap_workday_raas.client import (
     WorkdayOAuthClient, WorkdayBasicAuthClient, create_auth_client,
     stream_report, download_xsd,
@@ -702,23 +703,51 @@ class TestCreateAuthClientFactory(unittest.TestCase):
         client = create_auth_client(cfg)
         self.assertIsInstance(client, WorkdayOAuthClient)
 
+    def test_returns_oauth_client_for_authorization_code_auth_method(self):
+        cfg = {
+            "auth_method": "authorization_code",
+            "hostname": "test.workday.com",
+            "tenant": "mytenant",
+            "client_id": "cid",
+            "client_secret": "csecret",
+            "refresh_token": "rt",
+        }
+        client = create_auth_client(cfg)
+        self.assertIsInstance(client, WorkdayOAuthClient)
+
+    def test_returns_basic_auth_client_for_client_credentials_auth_method(self):
+        cfg = {
+            "auth_method": "client_credentials",
+            "username": "user",
+            "password": "pass",
+        }
+        client = create_auth_client(cfg)
+        self.assertIsInstance(client, WorkdayBasicAuthClient)
+
+    def test_client_credentials_auth_method_with_oauth_keys_raises(self):
+        cfg = {
+            "auth_method": "client_credentials",
+            "hostname": "test.workday.com",
+            "tenant": "mytenant",
+            "client_id": "cid",
+            "client_secret": "csecret",
+        }
+        with self.assertRaises(WorkdayRaasAuthenticationError):
+            create_auth_client(cfg)
+
     def test_partial_oauth_config_raises_authentication_error(self):
-        """Only some OAuth keys present — must raise, not silently use OAuth."""
         cfg = {
             "hostname": "test.workday.com",
             "client_id": "cid",
-            # missing tenant, client_secret, refresh_token
         }
         with self.assertRaises(WorkdayRaasAuthenticationError):
             create_auth_client(cfg)
 
     def test_partial_basic_config_raises_authentication_error(self):
-        """Only username without password — must raise."""
         with self.assertRaises(WorkdayRaasAuthenticationError):
             create_auth_client({"username": "user"})
 
     def test_no_auth_config_raises_authentication_error(self):
-        """Empty config — must raise, not proceed silently."""
         with self.assertRaises(WorkdayRaasAuthenticationError):
             create_auth_client({})
 
@@ -738,6 +767,41 @@ class TestCreateAuthClientFactory(unittest.TestCase):
         client = create_auth_client(cfg, config_path="/tmp/config.json")
         self.assertIsInstance(client, WorkdayOAuthClient)
         self.assertEqual(client._config_path, "/tmp/config.json")
+
+
+class TestValidateAuthConfig(unittest.TestCase):
+    def test_validate_authorization_code_mode(self):
+        cfg = {
+            "auth_method": "authorization_code",
+            "hostname": "test.workday.com",
+            "tenant": "mytenant",
+            "client_id": "cid",
+            "client_secret": "csecret",
+            "refresh_token": "rt",
+            "reports": "[]",
+        }
+        _validate_auth_config(cfg)
+
+    def test_validate_client_credentials_mode_requires_basic_auth(self):
+        cfg = {
+            "auth_method": "client_credentials",
+            "username": "user",
+            "password": "pass",
+            "reports": "[]",
+        }
+        _validate_auth_config(cfg)
+
+    def test_validate_client_credentials_mode_with_oauth_keys_fails(self):
+        cfg = {
+            "auth_method": "client_credentials",
+            "hostname": "test.workday.com",
+            "tenant": "mytenant",
+            "client_id": "cid",
+            "client_secret": "csecret",
+            "reports": "[]",
+        }
+        with self.assertRaises(WorkdayRaasAuthenticationError):
+            _validate_auth_config(cfg)
 
 
 # ---------------------------------------------------------------------------
