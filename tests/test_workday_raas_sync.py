@@ -83,7 +83,9 @@ class WorkdayRaasSync(unittest.TestCase):
         # select all catalogs
         for c in found_catalogs:
             catalog_entry = menagerie.get_annotated_schema(conn_id, c['stream_id'])
-            connections.select_catalog_via_metadata(conn_id, c, catalog_entry)
+            for field in catalog_entry['metadata']:
+                field['metadata']['selected'] = True
+            menagerie.write_metadata(conn_id, c['stream_id'], catalog_entry['metadata'])
 
         # clear state
         menagerie.set_state(conn_id, {})
