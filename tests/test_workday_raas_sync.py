@@ -10,17 +10,11 @@ import json
 class WorkdayRaasSync(unittest.TestCase):
     def setUp(self):
         missing_envs = [x for x in [
-            os.getenv('TAP_WORKDAY_RAAS_HOSTNAME'),
-            os.getenv('TAP_WORKDAY_RAAS_TENANT'),
-            os.getenv('TAP_WORKDAY_RAAS_CLIENT_ID'),
-            os.getenv('TAP_WORKDAY_RAAS_CLIENT_SECRET'),
-            os.getenv('TAP_WORKDAY_RAAS_REFRESH_TOKEN'),
-        ] if x is None]
+            os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
+            os.getenv('TAP_WORKDAY_RAAS_PASSWORD')] if x is None]
         if len(missing_envs) != 0:
             raise Exception(
-                "set TAP_WORKDAY_RAAS_HOSTNAME, TAP_WORKDAY_RAAS_TENANT, "
-                "TAP_WORKDAY_RAAS_CLIENT_ID, TAP_WORKDAY_RAAS_CLIENT_SECRET, "
-                "TAP_WORKDAY_RAAS_REFRESH_TOKEN"
+                "set TAP_WORKDAY_RAAS_USERNAME, TAP_WORKDAY_RAAS_PASSWORD"
             )
 
     def name(self):
@@ -31,8 +25,8 @@ class WorkdayRaasSync(unittest.TestCase):
 
     def get_credentials(self):
         return {
-            'client_secret': os.getenv('TAP_WORKDAY_RAAS_CLIENT_SECRET'),
-            'refresh_token': os.getenv('TAP_WORKDAY_RAAS_REFRESH_TOKEN'),
+            'username': os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
+            'password': os.getenv('TAP_WORKDAY_RAAS_PASSWORD'),
         }
 
     def expected_check_streams(self):
@@ -49,16 +43,10 @@ class WorkdayRaasSync(unittest.TestCase):
 
     def get_properties(self):
         return {
-            'hostname': os.getenv('TAP_WORKDAY_RAAS_HOSTNAME'),
-            'tenant': os.getenv('TAP_WORKDAY_RAAS_TENANT'),
-            'client_id': os.getenv('TAP_WORKDAY_RAAS_CLIENT_ID'),
-            'reports': json.dumps([{
-                'report_url': 'https://{}/ccx/service/customreport2/{}/lmcneil/Stitch_Testing_2'.format(
-                    os.getenv('TAP_WORKDAY_RAAS_HOSTNAME', ''),
-                    os.getenv('TAP_WORKDAY_RAAS_TENANT', ''),
-                ),
-                'report_name': 'stitch_test_report',
-            }]),
+            'start_date' : '2020-03-15T00:00:00Z',
+            'username': os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
+            'reports': json.dumps([{'report_url': 'https://wd2-impl-services1.workday.com/ccx/service/customreport2/talend_dpt1/tserrano/Customer_Invoice_Action_List?Company!WID=cb550da820584750aae8f807882fa79a&format=rss',
+                                    'report_name': 'stitch_test_report'}]),
         }
 
     def test_run(self):
@@ -76,16 +64,14 @@ class WorkdayRaasSync(unittest.TestCase):
 
         found_catalog_names = set(map(lambda c: c['tap_stream_id'], found_catalogs))
 
-        diff = self.expected_check_streams().symmetric_difference( found_catalog_names )
+        diff = self.expected_check_streams().symmetric_difference(found_catalog_names)
         self.assertEqual(len(diff), 0, msg="discovered schemas do not match: {}".format(diff))
         print("discovered schemas are kosher")
 
         # select all catalogs
         for c in found_catalogs:
             catalog_entry = menagerie.get_annotated_schema(conn_id, c['stream_id'])
-            for field in catalog_entry['metadata']:
-                field['metadata']['selected'] = True
-            menagerie.write_metadata(conn_id, c['stream_id'], catalog_entry['metadata'])
+            connections.select_catalog_via_metadata(conn_id, c, catalog_entry)
 
         # clear state
         menagerie.set_state(conn_id, {})
@@ -99,6 +85,6 @@ class WorkdayRaasSync(unittest.TestCase):
         # This should be validating the the PKs are written in each record
 
         record_count_by_stream = runner.examine_target_output_file(self, conn_id, self.expected_sync_streams(), self.expected_pks())
-        replicated_row_count =  reduce(lambda accum,c : accum + c, record_count_by_stream.values())
+        replicated_row_count = reduce(lambda accum, c: accum + c, record_count_by_stream.values())
         self.assertGreater(replicated_row_count, 0, msg="failed to replicate any data: {}".format(record_count_by_stream))
         print("total replicated row count: {}".format(replicated_row_count))
