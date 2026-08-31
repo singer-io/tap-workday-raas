@@ -4,16 +4,69 @@ import singer
 
 from singer import metadata
 from singer import utils
+from tap_workday_raas.client import create_auth_client
 from tap_workday_raas.discover import discover_streams
+from tap_workday_raas.exceptions import WorkdayRaasAuthenticationError
 from tap_workday_raas.sync import sync_report
 
-REQUIRED_CONFIG_KEYS = ["username", "password", "reports"]
+# Only `reports` is required at the Singer tap argument level.
+# OAuth2 mode: auth_method=authorization_code + hostname/tenant/client_id/client_secret/refresh_token
+# Basic auth mode: auth_method=client_credentials + username/password
+REQUIRED_CONFIG_KEYS = ["reports"]
 LOGGER = singer.get_logger()
 
+_OAUTH_KEYS = {"hostname", "tenant", "client_id", "client_secret", "refresh_token"}
+_BASIC_AUTH_KEYS = {"username", "password"}
 
-def do_discover(config):
+
+def _validate_auth_config(config):
+    """Validate two supported auth modes: OAuth2 and Basic Auth.
+
+    - auth_method == "authorization_code": requires full OAuth keys.
+    - auth_method == "client_credentials": requires username/password
+
+    Legacy configs with no auth_method are still supported by inferring mode
+    from complete key sets.
+    """
+    auth_method = config.get("auth_method")
+
+    if auth_method == "client_credentials":
+        missing = sorted(k for k in _BASIC_AUTH_KEYS if not config.get(k))
+        if missing:
+            raise WorkdayRaasAuthenticationError(
+                "auth_method is 'client_credentials' but config is missing "
+                "required basic auth keys: {}.".format(missing)
+            )
+        return
+
+    if auth_method == "authorization_code":
+        missing = sorted(k for k in _OAUTH_KEYS if not config.get(k))
+        if missing:
+            raise WorkdayRaasAuthenticationError(
+                "auth_method is 'authorization_code' but config is missing "
+                "required OAuth keys: {}.".format(missing)
+            )
+        return
+
+    has_oauth = all(config.get(k) for k in _OAUTH_KEYS)
+    has_basic = all(config.get(k) for k in _BASIC_AUTH_KEYS)
+    if not has_oauth and not has_basic:
+        missing_oauth = sorted(k for k in _OAUTH_KEYS if not config.get(k))
+        missing_basic = sorted(k for k in _BASIC_AUTH_KEYS if not config.get(k))
+        raise WorkdayRaasAuthenticationError(
+            "Config must contain either OAuth keys ({}) or basic auth keys ({}). "
+            "Missing OAuth keys: {}. Missing basic auth keys: {}.".format(
+                ", ".join(sorted(_OAUTH_KEYS)),
+                ", ".join(sorted(_BASIC_AUTH_KEYS)),
+                missing_oauth,
+                missing_basic,
+            )
+        )
+
+
+def do_discover(config, auth_client):
     LOGGER.info("Starting discover")
-    streams = discover_streams(config)
+    streams = discover_streams(config, auth_client)
     if not streams:
         raise Exception("No streams found")
     catalog = {"streams": streams}
@@ -21,11 +74,7 @@ def do_discover(config):
     LOGGER.info("Finished discover")
 
 
-def stream_is_selected(mdata):
-    return mdata.get((), {}).get("selected", False)
-
-
-def do_sync(config, catalog, state):
+def do_sync(config, catalog, state, auth_client):
     LOGGER.info("Starting sync.")
 
     reports = {report["report_name"]: report for report in json.loads(config["reports"])}
@@ -41,7 +90,7 @@ def do_sync(config, catalog, state):
         singer.write_schema(stream_name, stream.schema.to_dict(), key_properties)
 
         LOGGER.info("%s: Starting sync", stream_name)
-        counter_value = sync_report(report, stream, config)
+        counter_value = sync_report(report, stream, auth_client)
         LOGGER.info("%s: Completed sync (%s rows)", stream_name, counter_value)
 
     state = singer.set_currently_syncing(state, None)
@@ -52,11 +101,14 @@ def do_sync(config, catalog, state):
 @singer.utils.handle_top_exception(LOGGER)
 def main():
     args = utils.parse_args(REQUIRED_CONFIG_KEYS)
+    _validate_auth_config(args.config)
 
-    if args.discover:
-        do_discover(args.config)
-    elif args.catalog or args.properties:
-        do_sync(args.config, args.catalog, args.state)
+    config_path = getattr(args, "config_path", None)
+    with create_auth_client(args.config, config_path) as auth_client:
+        if args.discover:
+            do_discover(args.config, auth_client)
+        elif args.catalog or args.properties:
+            do_sync(args.config, args.catalog, args.state, auth_client)
 
 
 if __name__ == "__main__":

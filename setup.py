@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name="tap-workday-raas",
-    version="1.2.1",
+    version="1.3.0",
     description="Singer.io tap for extracting data",
     author="Stitch",
     url="http://singer.io",

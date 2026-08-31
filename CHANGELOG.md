@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0
+  * Adds OAuth 2.0 authentication support, including hostname + tenant token endpoint derivation, HTTP Basic authentication for token refresh, and rotating refresh token persistence.
+  * Adds backward-compatible HTTP Basic authentication alongside OAuth 2.0, so existing username/password connections continue to work. Authentication mode is selected automatically based on the configured credentials. [#32](https://github.com/singer-io/tap-workday-raas/pull/32)
+
 ## 1.2.1
   * Makes JSON fields nullable and adds tests. Updates requests, ijson and singer-python versions [#29](https://github.com/singer-io/tap-workday-raas/pull/29)
   * Validation for duplicate report name

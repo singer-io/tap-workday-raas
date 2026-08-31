@@ -115,7 +115,7 @@ def generate_schema_for_report(xsd):
     return schema
 
 
-def enrich_schema_from_data(schema, report_url, username, password, sample_size=100):
+def enrich_schema_from_data(schema, report_url, auth_client, sample_size=100):
     """Enrich schema with column definitions found in actual report data but missing from XSD.
 
     Workday's XSD endpoint may omit columns where all rows contain null values.
@@ -127,7 +127,7 @@ def enrich_schema_from_data(schema, report_url, username, password, sample_size=
 
     try:
         all_columns = {}  # column_name -> first non-None sample value
-        for i, record in enumerate(stream_report(report_url, username, password)):
+        for i, record in enumerate(stream_report(report_url, auth_client)):
             for key, value in record.items():
                 if key not in all_columns or all_columns[key] is None:
                     all_columns[key] = value
@@ -157,7 +157,7 @@ def enrich_schema_from_data(schema, report_url, username, password, sample_size=
     return schema
 
 
-def discover_streams(config):
+def discover_streams(config, auth_client):
     streams = []
 
     reports = json.loads(config["reports"])
@@ -173,9 +173,6 @@ def discover_streams(config):
             )
         )
 
-    username = config["username"]
-    password = config["password"]
-
     failed_reports = []
 
     for report in reports:
@@ -185,7 +182,7 @@ def discover_streams(config):
         LOGGER.info('Downloading XSD to determine table schema "%s"', report_name)
 
         try:
-            xsd = download_xsd(report_url, username, password)
+            xsd = download_xsd(report_url, auth_client)
         except requests.exceptions.HTTPError as e:
             status_code = e.response.status_code if e.response is not None else "unknown"
             response_text = _sanitize_response_text(e.response.text if e.response is not None else None)
@@ -231,7 +228,7 @@ def discover_streams(config):
 
         LOGGER.info('Enriching schema with columns from data for "%s".', report_name)
         try:
-            schema = enrich_schema_from_data(schema, report_url, username, password)
+            schema = enrich_schema_from_data(schema, report_url, auth_client)
         except requests.exceptions.HTTPError as e:
             status_code = e.response.status_code if e.response is not None else "unknown"
             response_text = _sanitize_response_text(e.response.text if e.response is not None else None)

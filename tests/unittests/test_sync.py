@@ -1,8 +1,24 @@
 import unittest
 from unittest.mock import patch, MagicMock
+import time
 
+from tap_workday_raas.client import WorkdayOAuthClient
 from tap_workday_raas.sync import sync_report
 from tap_workday_raas.schema_utils import infer_schema_from_value
+
+
+def _make_auth_client():
+    """Return a WorkdayOAuthClient with fake test credentials."""
+    client = WorkdayOAuthClient({
+        "client_id": "test-client-id",
+        "client_secret": "test-client-secret",
+        "refresh_token": "test-refresh-token",
+        "hostname": "test.workday.com",
+        "tenant": "tenant",
+    })
+    client._access_token = "test-access-token"
+    client._expires_at = time.monotonic() + 86400
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -79,9 +95,6 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
     """Ensure sync_report dynamically expands the schema for new columns
     and fills null for missing columns."""
 
-    def _default_config(self):
-        return {"username": "u", "password": "p"}
-
     def _default_report(self):
         return {"report_url": "http://fake", "report_name": "test_report"}
 
@@ -103,7 +116,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
             {"col_a": "v1", "col_new": "surprise"},
         ])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         # write_schema must be called with the expanded schema
         schema_calls = [c for c in mock_singer.write_schema.call_args_list]
@@ -127,7 +140,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
             {"col_a": "v1", "col_new": "surprise"},
         ])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         # RecordMessage is called with (tap_stream_id, record_dict, version=...)
         rm_calls = mock_singer.RecordMessage.call_args_list
@@ -155,7 +168,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
             {"col_a": "only_a"},  # col_b and col_c are missing
         ])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         rm_calls = mock_singer.RecordMessage.call_args_list
         self.assertEqual(len(rm_calls), 1)
@@ -184,7 +197,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
             {"col_a": "v1", "col_b": 42},
         ])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         mock_singer.write_schema.assert_not_called()
 
@@ -207,7 +220,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
             {"col_a": "v2", "col_late": "appeared"},
         ])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         # write_schema should have been called once (when col_late first appeared)
         self.assertEqual(mock_singer.write_schema.call_count, 1)
@@ -242,7 +255,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
             {"col_a": "v1", "new1": "x", "new2": 99, "new3": True},
         ])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         rm_calls = mock_singer.RecordMessage.call_args_list
         record = rm_calls[0][0][1]
@@ -268,7 +281,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
             {"col_a": "v3"},
         ])
 
-        count = sync_report(self._default_report(), stream, self._default_config())
+        count = sync_report(self._default_report(), stream, _make_auth_client())
         self.assertEqual(count, 3)
 
     # -----------------------------------------------------------------------
@@ -284,7 +297,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
         stream = _make_stream("test", schema)
         mock_stream_report.return_value = iter([{"col_a": "v1"}])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         rm_calls = mock_singer.RecordMessage.call_args_list
         record = rm_calls[0][0][1]
@@ -300,7 +313,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
         stream = _make_stream("test", schema)
         mock_stream_report.return_value = iter([{"new_str": "hello"}])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         schema_call = mock_singer.write_schema.call_args_list[-1]
         emitted_schema = schema_call[0][1]
@@ -315,7 +328,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
         stream = _make_stream("test", schema)
         mock_stream_report.return_value = iter([{"new_num": 42}])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         schema_call = mock_singer.write_schema.call_args_list[-1]
         emitted_schema = schema_call[0][1]
@@ -330,7 +343,7 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
         stream = _make_stream("test", schema)
         mock_stream_report.return_value = iter([{"new_null": None}])
 
-        sync_report(self._default_report(), stream, self._default_config())
+        sync_report(self._default_report(), stream, _make_auth_client())
 
         schema_call = mock_singer.write_schema.call_args_list[-1]
         emitted_schema = schema_call[0][1]

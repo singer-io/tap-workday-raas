@@ -9,10 +9,13 @@ import json
 
 class WorkdayRaasSync(unittest.TestCase):
     def setUp(self):
-        missing_envs = [x for x in [os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
-                                    os.getenv('TAP_WORKDAY_RAAS_PASSWORD')] if x == None]
+        missing_envs = [x for x in [
+            os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
+            os.getenv('TAP_WORKDAY_RAAS_PASSWORD')] if x is None]
         if len(missing_envs) != 0:
-            raise Exception("set TAP_WORKDAY_RAAS_USERNAME, TAP_WORKDAY_RAAS_PASSWORD")
+            raise Exception(
+                "set TAP_WORKDAY_RAAS_USERNAME, TAP_WORKDAY_RAAS_PASSWORD"
+            )
 
     def name(self):
         return "tap_tester_workday_raas_sync"
@@ -21,7 +24,10 @@ class WorkdayRaasSync(unittest.TestCase):
         return "platform.workday-raas"
 
     def get_credentials(self):
-        return {'password': os.getenv('TAP_WORKDAY_RAAS_PASSWORD')}
+        return {
+            'username': os.getenv('TAP_WORKDAY_RAAS_USERNAME'),
+            'password': os.getenv('TAP_WORKDAY_RAAS_PASSWORD'),
+        }
 
     def expected_check_streams(self):
         return {'stitch_test_report'}
@@ -58,7 +64,7 @@ class WorkdayRaasSync(unittest.TestCase):
 
         found_catalog_names = set(map(lambda c: c['tap_stream_id'], found_catalogs))
 
-        diff = self.expected_check_streams().symmetric_difference( found_catalog_names )
+        diff = self.expected_check_streams().symmetric_difference(found_catalog_names)
         self.assertEqual(len(diff), 0, msg="discovered schemas do not match: {}".format(diff))
         print("discovered schemas are kosher")
 
@@ -77,8 +83,8 @@ class WorkdayRaasSync(unittest.TestCase):
         menagerie.verify_sync_exit_status(self, exit_status, sync_job_name)
 
         # This should be validating the the PKs are written in each record
-        
+
         record_count_by_stream = runner.examine_target_output_file(self, conn_id, self.expected_sync_streams(), self.expected_pks())
-        replicated_row_count =  reduce(lambda accum,c : accum + c, record_count_by_stream.values())
+        replicated_row_count = reduce(lambda accum, c: accum + c, record_count_by_stream.values())
         self.assertGreater(replicated_row_count, 0, msg="failed to replicate any data: {}".format(record_count_by_stream))
         print("total replicated row count: {}".format(replicated_row_count))

@@ -14,10 +14,39 @@ All API calls are mocked – no real credentials needed.
 import json
 import unittest
 from unittest.mock import patch, MagicMock
+import time
 
 from tap_workday_raas import discover
-from tap_workday_raas.client import stream_report
+from tap_workday_raas.client import WorkdayOAuthClient, stream_report
 from tap_workday_raas.sync import sync_report
+
+
+def _make_auth_client():
+    """Return a WorkdayOAuthClient with fake test credentials."""
+    client = WorkdayOAuthClient({
+        "client_id": "test-client-id",
+        "client_secret": "test-client-secret",
+        "refresh_token": "test-refresh-token",
+        "hostname": "test.workday.com",
+        "tenant": "tenant",
+    })
+    client._access_token = "test-access-token"
+    client._expires_at = time.monotonic() + 86400
+    return client
+
+
+def _oauth_config(extra=None):
+    """Return an OAuth config dict with fake credentials."""
+    cfg = {
+        "tenant": "tenant",
+        "hostname": "test.workday.com",
+        "client_id": "test-client-id",
+        "client_secret": "test-client-secret",
+        "refresh_token": "test-refresh-token",
+    }
+    if extra:
+        cfg.update(extra)
+    return cfg
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +144,7 @@ class TestStreamReportZeroRows(unittest.TestCase):
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_get.return_value = mock_resp
 
-        records = list(stream_report("http://fake?format=json", "u", "p"))
+        records = list(stream_report("http://fake?format=json", _make_auth_client()))
         self.assertEqual(records, [])
 
     @patch("tap_workday_raas.client.requests.get")
@@ -129,7 +158,7 @@ class TestStreamReportZeroRows(unittest.TestCase):
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_get.return_value = mock_resp
 
-        records = list(stream_report("http://fake", "u", "p"))
+        records = list(stream_report("http://fake", _make_auth_client()))
         self.assertEqual(records, [])
 
     @patch("tap_workday_raas.client.requests.get")
@@ -152,7 +181,7 @@ class TestStreamReportZeroRows(unittest.TestCase):
 
         with patch("tap_workday_raas.client.LOGGER") as mock_logger:
             # Consume the generator fully
-            list(stream_report("http://fake", "u", "p"))
+            list(stream_report("http://fake", _make_auth_client()))
             # The warning about missing Report_Entry should NOT fire
             mock_logger.warning.assert_not_called()
 
@@ -168,7 +197,7 @@ class TestStreamReportZeroRows(unittest.TestCase):
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_get.return_value = mock_resp
 
-        list(stream_report("http://fake", "u", "p"))
+        list(stream_report("http://fake", _make_auth_client()))
 
         # Should have called LOGGER.warning, not raised
         mock_logger.warning.assert_called_once()
@@ -192,7 +221,7 @@ class TestStreamReportZeroRows(unittest.TestCase):
         mock_get.return_value = mock_resp
 
         with self.assertRaises(Exception) as ctx:
-            list(stream_report("http://fake", "u", "p"))
+            list(stream_report("http://fake", _make_auth_client()))
         self.assertIn("Report_Entry", str(ctx.exception))
 
     @patch("tap_workday_raas.client.requests.get")
@@ -208,7 +237,7 @@ class TestStreamReportZeroRows(unittest.TestCase):
         mock_get.return_value = mock_resp
 
         # Should NOT raise — valid JSON object, just no Report_Entry
-        records = list(stream_report("http://fake", "u", "p"))
+        records = list(stream_report("http://fake", _make_auth_client()))
         self.assertEqual(records, [])
 
     @patch("tap_workday_raas.client.requests.get")
@@ -241,7 +270,7 @@ class TestStreamReportZeroRows(unittest.TestCase):
 
         with patch("tap_workday_raas.client.LOGGER") as mock_logger:
             # Consume the generator – the key detection must succeed
-            list(stream_report("http://fake", "u", "p"))
+            list(stream_report("http://fake", _make_auth_client()))
             # Parser-based detection should find the key despite the split;
             # no "missing key" warning should be emitted.
             mock_logger.warning.assert_not_called()
@@ -259,7 +288,7 @@ class TestSyncReportZeroRows(unittest.TestCase):
     when the API yields no rows."""
 
     def _config(self):
-        return {"username": "u", "password": "p"}
+        return _make_auth_client()
 
     def _report(self):
         return {"report_url": "http://fake", "report_name": "daily_updates"}
@@ -346,16 +375,14 @@ class TestSchemaPreservedOnZeroRows(unittest.TestCase):
         catalog = MagicMock()
         catalog.get_selected_streams.return_value = [stream_obj]
 
-        config = {
-            "username": "u",
-            "password": "p",
+        config = _oauth_config({
             "reports": json.dumps([{
                 "report_url": "http://fake",
                 "report_name": "daily_updates",
             }]),
-        }
+        })
 
-        do_sync(config, catalog, {})
+        do_sync(config, catalog, {}, _make_auth_client())
 
         # write_schema must have been called with our schema
         schema_calls = [
@@ -375,10 +402,9 @@ class TestSchemaPreservedOnZeroRows(unittest.TestCase):
         mock_xsd.return_value = XSD_WITH_SUBGROUP
         mock_enrich.side_effect = lambda s, *a, **kw: s
 
-        streams = discover.discover_streams({
-            "username": "u", "password": "p",
+        streams = discover.discover_streams(_oauth_config({
             "reports": '[{"report_url": "http://fake", "report_name": "rpt"}]',
-        })
+        }), _make_auth_client())
 
         schema = streams[0]["schema"]
         # All columns from XSD must be present
@@ -398,7 +424,7 @@ class TestZeroRowLogging(unittest.TestCase):
     rather than error-level output."""
 
     def _config(self):
-        return {"username": "u", "password": "p"}
+        return _make_auth_client()
 
     def _report(self):
         return {"report_url": "http://fake", "report_name": "daily_updates"}
@@ -472,7 +498,7 @@ class TestEndToEndZeroRows(unittest.TestCase):
     day with no updates."""
 
     def _config(self):
-        return {"username": "u", "password": "p"}
+        return _make_auth_client()
 
     def _report(self):
         return {"report_url": "http://fake", "report_name": "rpt"}
