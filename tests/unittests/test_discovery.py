@@ -90,6 +90,55 @@ class DiscoveryTest(unittest.TestCase):
         self.assertEqual(expected, actual)
 
 
+class TestBooleanFlagColumns(unittest.TestCase):
+    """Test that 'is_' prefixed columns are always typed as boolean, regardless
+    of the XSD-declared type, so behavior is consistent across reports/customers."""
+
+    boolean_flag_xsd = """<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wd="urn:com.workday.report/Stitch_Testing_2" targetNamespace="urn:com.workday.report/Stitch_Testing_2">
+    <xsd:element name="Report_Data" type="wd:Report_DataType"/>
+    <xsd:complexType name="Report_EntryType">
+        <xsd:sequence>
+            <xsd:element name="is_manager" type="xsd:string" minOccurs="0"/>
+            <xsd:element name="Is_Temporary" type="xsd:boolean" minOccurs="0"/>
+            <xsd:element name="issue_type" type="xsd:string" minOccurs="0"/>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="Report_DataType">
+        <xsd:sequence>
+            <xsd:element name="Report_Entry" type="wd:Report_EntryType" minOccurs="0" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+</xsd:schema>
+"""
+
+    def test_is_prefixed_string_column_forced_to_boolean(self):
+        """A column declared as xsd:string by the XSD but matching the 'is_' naming
+        convention is still typed as boolean."""
+        schema = discover.generate_schema_for_report(self.boolean_flag_xsd)
+        self.assertEqual(schema["properties"]["is_manager"], {"type": ["boolean", "null"]})
+
+    def test_is_prefixed_boolean_column_stays_boolean(self):
+        """A column already declared as xsd:boolean remains boolean."""
+        schema = discover.generate_schema_for_report(self.boolean_flag_xsd)
+        self.assertEqual(schema["properties"]["Is_Temporary"], {"type": ["boolean", "null"]})
+
+    def test_non_is_prefixed_column_unaffected(self):
+        """A column that merely contains 'is' but isn't 'is_' prefixed is untouched."""
+        schema = discover.generate_schema_for_report(self.boolean_flag_xsd)
+        self.assertEqual(schema["properties"]["issue_type"], {"type": ["string", "null"]})
+
+    @patch("tap_workday_raas.discover.stream_report")
+    def test_is_prefixed_column_found_only_in_data_forced_to_boolean(self, mock_stream):
+        """A column absent from the XSD but sampled as a string value is forced to
+        boolean when its name matches the 'is_' naming convention."""
+        mock_stream.return_value = iter([{"is_rehire": "True"}])
+        schema = {"type": "object", "properties": {}}
+        result = discover.enrich_schema_from_data(schema, "http://fake", _make_auth_client())
+
+        self.assertEqual(result["properties"]["is_rehire"], {"type": ["boolean", "null"]})
+
+
 class TestInferSchemaFromValue(unittest.TestCase):
     """Test infer_schema_from_value type inference for various Python values."""
 

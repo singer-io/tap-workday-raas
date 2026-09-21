@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.1
+  * Forces `is_`-prefixed boolean flag columns (e.g. `is_manager`, `is_temporary`) to always be typed and transformed as boolean, regardless of whether Workday's per-report XSD declares them as `xsd:string` or `xsd:boolean`. Fixes inconsistent column types (and stringified `1`/`0` values) for the same logical field across different reports/customers.
+
 ## 1.3.0
   * Adds OAuth 2.0 authentication support, including hostname + tenant token endpoint derivation, HTTP Basic authentication for token refresh, and rotating refresh token persistence.
   * Adds backward-compatible HTTP Basic authentication alongside OAuth 2.0, so existing username/password connections continue to work. Authentication mode is selected automatically based on the configured credentials. [#32](https://github.com/singer-io/tap-workday-raas/pull/32)

@@ -1,4 +1,5 @@
 import json
+import re
 from xml.etree import ElementTree
 import singer
 import requests
@@ -9,6 +10,19 @@ from tap_workday_raas.client import download_xsd, stream_report
 from tap_workday_raas.schema_utils import infer_schema_from_value
 
 LOGGER = singer.get_logger()
+
+# Workday's "is_" naming convention marks Yes/No flag columns (e.g. is_manager,
+# is_temporary). Depending on how a field was added to a given report, Workday's
+# XSD (and the raw sampled values) can describe the same logical flag as either
+# xsd:string or xsd:boolean, which makes downstream targets create inconsistent
+# column types across reports/customers for what is really the same field.
+# Force these columns to boolean so behavior is consistent regardless of the
+# per-report XSD declaration.
+BOOLEAN_FLAG_COLUMN_RE = re.compile(r"^is_", re.IGNORECASE)
+
+
+def _is_boolean_flag_column(name):
+    return bool(BOOLEAN_FLAG_COLUMN_RE.match(name))
 
 
 def _sanitize_response_text(text, max_length=500):
@@ -25,6 +39,8 @@ def _sanitize_response_text(text, max_length=500):
 
 def _element_to_schema(element):
     elem_type = element.attrib["type"].split(":")[1]
+    if elem_type == "string" and _is_boolean_flag_column(element.attrib["name"]):
+        elem_type = "boolean"
     is_nullable = element.attrib.get("minOccurs") == "0"
 
     max_occurs = element.attrib.get("maxOccurs")
@@ -137,6 +153,8 @@ def enrich_schema_from_data(schema, report_url, auth_client, sample_size=100):
         for col, sample_value in all_columns.items():
             if col not in schema["properties"]:
                 inferred_schema = infer_schema_from_value(sample_value)
+                if inferred_schema["type"] == ["string", "null"] and _is_boolean_flag_column(col):
+                    inferred_schema = {"type": ["boolean", "null"]}
                 LOGGER.info(
                     'Found column "%s" in data not in XSD schema. '
                     'Adding with inferred type: %s',
