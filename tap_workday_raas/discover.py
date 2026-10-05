@@ -38,8 +38,9 @@ def _element_to_schema(element):
     if elem_type in ("date", "dateTime"):
         schema = {"type": ["string"], "format": "date-time"}
     elif elem_type == "decimal":
-        # TODO Update to the singer.decimal format when that is available
-        schema = {"type": ["number"],}
+        schema = {"type": ["string"], "format": "singer.decimal"}
+    elif elem_type == "RichText":
+        schema = {"type": ["string"]}
     else:
         schema = {"type": [elem_type]}
 

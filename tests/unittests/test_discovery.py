@@ -1,6 +1,7 @@
 import time
 import unittest
 from unittest.mock import patch, MagicMock
+from xml.etree import ElementTree
 import requests
 
 from tap_workday_raas import discover
@@ -71,8 +72,8 @@ class DiscoveryTest(unittest.TestCase):
     def test_generate_schema_for_report(self):
 
         expected = {'properties':
-                    {'Average_Pay_-_Amount': {
-                                              'type': ['number', 'null']},
+                    {'Average_Pay_-_Amount': {'type': ['string', 'null'],
+                                              'format': 'singer.decimal'},
                      'Business_Unit_or_Business_Unit_Hierarchy_Container': {'type': ['string', 'null']},
                      'Candidate_Details_group': {'items':
                                                  {'properties': {'Employee': {'type': ['string', 'null']},
@@ -88,6 +89,90 @@ class DiscoveryTest(unittest.TestCase):
 
         actual = discover.generate_schema_for_report(xsd)
         self.assertEqual(expected, actual)
+
+    def test_generate_schema_for_report_maps_richtext_to_string(self):
+        """A wd:RichText field in Report_EntryType is emitted as a plain string."""
+        richtext_xsd = """<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wd="urn:com.workday.report/Stitch_Testing_2" elementFormDefault="qualified" attributeFormDefault="qualified" targetNamespace="urn:com.workday.report/Stitch_Testing_2">
+    <xsd:element name="Report_Data" type="wd:Report_DataType"/>
+    <xsd:simpleType name="RichText">
+        <xsd:restriction base="xsd:string"/>
+    </xsd:simpleType>
+    <xsd:complexType name="Report_EntryType">
+        <xsd:sequence>
+            <xsd:element name="JOB_PROD_RESPONSIBILITIES" type="wd:RichText" minOccurs="0"/>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="Report_DataType">
+        <xsd:sequence>
+            <xsd:element name="Report_Entry" type="wd:Report_EntryType" minOccurs="0" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+</xsd:schema>
+"""
+        expected = {
+            "type": "object",
+            "properties": {
+                "JOB_PROD_RESPONSIBILITIES": {"type": ["string", "null"]},
+            },
+        }
+        self.assertEqual(expected, discover.generate_schema_for_report(richtext_xsd))
+
+
+class TestElementToSchema(unittest.TestCase):
+    """Test _element_to_schema mapping of xsd types to JSON schema."""
+
+    def _element(self, elem_type, **attrs):
+        """Build an xsd:element with the given type and attributes."""
+        attrib = {"name": "field", "type": elem_type}
+        attrib.update(attrs)
+        return ElementTree.Element("{http://www.w3.org/2001/XMLSchema}element", attrib)
+
+    def test_decimal_returns_singer_decimal_string(self):
+        result = discover._element_to_schema(self._element("xsd:decimal"))
+        self.assertEqual(result, {"type": ["string"], "format": "singer.decimal"})
+
+    def test_nullable_decimal_returns_nullable_singer_decimal_string(self):
+        result = discover._element_to_schema(self._element("xsd:decimal", minOccurs="0"))
+        self.assertEqual(result, {"type": ["string", "null"], "format": "singer.decimal"})
+
+    def test_richtext_returns_string(self):
+        result = discover._element_to_schema(self._element("wd:RichText"))
+        self.assertEqual(result, {"type": ["string"]})
+
+    def test_nullable_richtext_returns_nullable_string(self):
+        result = discover._element_to_schema(self._element("wd:RichText", minOccurs="0"))
+        self.assertEqual(result, {"type": ["string", "null"]})
+
+    def test_repeated_decimal_returns_array_of_singer_decimal(self):
+        result = discover._element_to_schema(self._element("xsd:decimal", maxOccurs="unbounded"))
+        self.assertEqual(result, {
+            "type": "array",
+            "items": {"type": ["string"], "format": "singer.decimal"},
+        })
+
+    def test_repeated_nullable_decimal_returns_nullable_array_of_singer_decimal(self):
+        result = discover._element_to_schema(
+            self._element("xsd:decimal", minOccurs="0", maxOccurs="unbounded"))
+        self.assertEqual(result, {
+            "type": ["null", "array"],
+            "items": {"type": ["string", "null"], "format": "singer.decimal"},
+        })
+
+    def test_repeated_richtext_returns_array_of_string(self):
+        result = discover._element_to_schema(self._element("wd:RichText", maxOccurs="unbounded"))
+        self.assertEqual(result, {
+            "type": "array",
+            "items": {"type": ["string"]},
+        })
+
+    def test_repeated_nullable_richtext_returns_nullable_array_of_string(self):
+        result = discover._element_to_schema(
+            self._element("wd:RichText", minOccurs="0", maxOccurs="unbounded"))
+        self.assertEqual(result, {
+            "type": ["null", "array"],
+            "items": {"type": ["string", "null"]},
+        })
 
 
 class TestInferSchemaFromValue(unittest.TestCase):
