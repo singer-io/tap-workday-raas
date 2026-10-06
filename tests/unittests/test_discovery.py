@@ -174,6 +174,22 @@ class TestElementToSchema(unittest.TestCase):
             "items": {"type": ["string", "null"]},
         })
 
+    def test_string_returns_string(self):
+        result = discover._element_to_schema(self._element("xsd:string"))
+        self.assertEqual(result, {"type": ["string"]})
+
+    def test_boolean_returns_boolean(self):
+        result = discover._element_to_schema(self._element("xsd:boolean"))
+        self.assertEqual(result, {"type": ["boolean"]})
+
+    def test_unknown_datatype_raises(self):
+        element = self._element("wd:UnknownType")
+
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported Workday XSD datatype"
+        ):
+            discover._element_to_schema(element)
+
 
 class TestInferSchemaFromValue(unittest.TestCase):
     """Test infer_schema_from_value type inference for various Python values."""

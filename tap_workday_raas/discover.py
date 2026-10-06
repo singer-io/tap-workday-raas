@@ -41,8 +41,12 @@ def _element_to_schema(element):
         schema = {"type": ["string"], "format": "singer.decimal"}
     elif elem_type == "RichText":
         schema = {"type": ["string"]}
+    elif elem_type == "string":
+        schema = {"type": ["string"]}
+    elif elem_type == "boolean":
+        schema = {"type": ["boolean"]}
     else:
-        schema = {"type": [elem_type]}
+        raise ValueError("Unsupported Workday XSD datatype: '{}'".format(elem_type))
 
     if is_nullable:
         schema["type"].append("null")
