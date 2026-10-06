@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.0
+  * Fixes decimal report fields being inferred as floating-point numbers by mapping `xsd:decimal` fields to `singer.decimal` strings to preserve precision.
+  * Fixes connection creation for Workday reports containing `wd:RichText` fields by mapping them to string fields. [#35](https://github.com/singer-io/tap-workday-raas/pull/35)
+
 ## 1.3.0
   * Adds OAuth 2.0 authentication support, including hostname + tenant token endpoint derivation, HTTP Basic authentication for token refresh, and rotating refresh token persistence.
   * Adds backward-compatible HTTP Basic authentication alongside OAuth 2.0, so existing username/password connections continue to work. Authentication mode is selected automatically based on the configured credentials. [#32](https://github.com/singer-io/tap-workday-raas/pull/32)

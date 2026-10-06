@@ -38,10 +38,15 @@ def _element_to_schema(element):
     if elem_type in ("date", "dateTime"):
         schema = {"type": ["string"], "format": "date-time"}
     elif elem_type == "decimal":
-        # TODO Update to the singer.decimal format when that is available
-        schema = {"type": ["number"],}
+        schema = {"type": ["string"], "format": "singer.decimal"}
+    elif elem_type == "RichText":
+        schema = {"type": ["string"]}
+    elif elem_type == "string":
+        schema = {"type": ["string"]}
+    elif elem_type == "boolean":
+        schema = {"type": ["boolean"]}
     else:
-        schema = {"type": [elem_type]}
+        raise ValueError("Unsupported Workday XSD datatype: '{}'".format(elem_type))
 
     if is_nullable:
         schema["type"].append("null")
