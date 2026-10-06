@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0
+## 2.0.0
   * Fixes decimal report fields being inferred as floating-point numbers by mapping `xsd:decimal` fields to `singer.decimal` strings to preserve precision.
   * Fixes connection creation for Workday reports containing `wd:RichText` fields by mapping them to string fields. [#35](https://github.com/singer-io/tap-workday-raas/pull/35)
 
