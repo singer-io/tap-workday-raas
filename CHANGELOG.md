@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.1.0
+  * Adds OAuth 2.0 JWT Bearer Token authentication (`auth_method: jwt_bearer`), for Workday Integration System User / API client setups that sign a short-lived JWT assertion with an RSA private key instead of using a refresh token. [#36](https://github.com/singer-io/tap-workday-raas/pull/36)
+
 ## 2.0.0
   * Fixes decimal report fields being inferred as floating-point numbers by mapping `xsd:decimal` fields to `singer.decimal` strings to preserve precision.
   * Fixes connection creation for Workday reports containing `wd:RichText` fields by mapping them to string fields. [#35](https://github.com/singer-io/tap-workday-raas/pull/35)

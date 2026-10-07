@@ -26,10 +26,10 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
    ```
 ## Create Config
 
-   Create your tap's `config.json` file. The tap supports two authentication
+   Create your tap's `config.json` file. The tap supports three authentication
    modes, selected via the `auth_method` field.
 
-   The `reports` field is required for both modes:
+   The `reports` field is required for all modes:
 
    - `reports` – A JSON string containing a list of objects, each with a
      `report_name` and `report_url`. `report_name` is used as the Singer
@@ -85,7 +85,62 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
 
    ---
 
-   ### Mode 2 — Basic Auth (`auth_method: client_credentials`)
+   ### Mode 2 — OAuth 2.0 JWT Bearer Token (`auth_method: jwt_bearer`)
+
+   Use this mode when you have a Workday Integration System User (ISU) or API
+   client configured for the **JWT Bearer Token** grant (RFC 7523). No
+   refresh token or interactive authorization step is required — the tap
+   signs a short-lived JWT assertion with your private key for every token
+   request. The matching public key/certificate must be registered on the
+   Workday API client/ISU.
+
+   Required fields:
+
+   | Field | Description |
+   |-------|-------------|
+   | `auth_method` | Must be `"jwt_bearer"` |
+   | `jwt_hostname` | Workday hostname |
+   | `jwt_tenant` | Workday tenant name |
+   | `jwt_client_id` | OAuth client ID registered in Workday |
+   | `private_key` | PEM-encoded RSA private key used to sign the JWT assertion |
+   | `isu` | Integration System User - used as the JWT `sub` claim |
+
+   Optional fields:
+
+   | Field | Description |
+   |-------|-------------|
+   | `jwt_assertion_ttl_secs` | JWT assertion lifetime in seconds (default `300`) |
+   | `token_endpoint` | Override the derived token endpoint |
+
+   ```json
+   {
+       "auth_method": "jwt_bearer",
+       "jwt_hostname": "<WORKDAY_HOSTNAME>",
+       "jwt_tenant": "<TENANT>",
+       "jwt_client_id": "<CLIENT_ID>",
+       "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+       "isu": "<ISU_USERNAME>",
+       "reports": "[{\"report_name\": \"my_report\", \"report_url\": \"https://...\"}]"
+   }
+   ```
+
+   #### Token request behaviour
+
+   The tap signs an RS256 JWT assertion (`iss` = `jwt_client_id`, `sub` = `isu`,
+   `aud` = the fixed value `"wd"`, short `exp`) and exchanges it at:
+
+   ```
+   https://<jwt_hostname>/ccx/oauth2/<jwt_tenant>/token
+   ```
+
+   using `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`. The
+   resulting access token is sent as a Bearer token on every RaaS and XSD
+   request, with the same automatic refresh-and-retry-once behavior on HTTP
+   401/403 as the Authorization Code mode.
+
+   ---
+
+   ### Mode 3 — Basic Auth (`auth_method: basic_auth`)
 
    Use this mode when authenticating with a Workday username and password.
 
@@ -93,13 +148,13 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
 
    | Field | Description |
    |-------|-------------|
-   | `auth_method` | Must be `"client_credentials"` |
+   | `auth_method` | Must be `"basic_auth"` |
    | `username` | Workday username |
    | `password` | Workday password |
 
    ```json
    {
-       "auth_method": "client_credentials",
+       "auth_method": "basic_auth",
        "username": "<USERNAME>",
        "password": "<PASSWORD>",
        "reports": "[{\"report_name\": \"my_report\", \"report_url\": \"https://...\"}]"

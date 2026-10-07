@@ -1,6 +1,7 @@
 import base64
 import json
 import time
+import jwt
 import requests
 import ijson.backends.yajl2_c as ijson
 import ijson as ijson_core
@@ -14,33 +15,37 @@ _AUTH_FAILURE_CODES = (401, 403)
 _EXPIRY_BUFFER_SECS = 60  # refresh proactively 60 s before actual expiry
 
 
-class WorkdayOAuthClient:
-    """Manages OAuth 2.0 token lifecycle for Workday RaaS requests using the
-    ``authorization_code`` grant (refresh_token exchange).
+class _WorkdayTokenAuthClientBase:
+    """Shared OAuth 2.0 access-token lifecycle for grant types that exchange
+    grant credentials for a Bearer access token: caching, proactive refresh
+    60 s before expiry, and a single retry on HTTP 401/403.
 
-      - Token endpoint is derived from ``hostname`` + ``tenant`` when
-        ``token_endpoint`` is not explicitly provided.
-      - Refresh uses HTTP Basic auth for ``client_id``/``client_secret``.
-      - Workday rotating refresh tokens are persisted back to the config
-        file so the next tap process uses the updated token.
-      - Use as a context manager: token is always refreshed on ``__enter__``.
-      - ``get_access_token()`` proactively refreshes 60 s before expiry.
+    Subclasses provide the grant-specific pieces by implementing
+    ``_default_token_endpoint()`` (derive the endpoint from config),
+    ``_token_request_kwargs()`` (the ``requests.post`` kwargs for the grant),
+    and optionally ``_unauthorized_message()`` / ``_on_token_response()``.
     """
+
+    _GRANT_LABEL = "OAuth"
 
     def __init__(self, config, config_path=None):
         self.config = config
         self._config_path = config_path
-        # Derive token endpoint from hostname + tenant when not explicitly set.
-        self._token_endpoint = config.get("token_endpoint") or (
-            "https://{}/ccx/oauth2/{}/token".format(
-                config["hostname"], config["tenant"]
-            )
-        )
-        self._client_id = config["client_id"]
-        self._client_secret = config["client_secret"]
-        self._refresh_token = config["refresh_token"]
+        self._token_endpoint = config.get("token_endpoint") or self._default_token_endpoint(config)
         self._access_token = None
         self._expires_at = 0.0
+
+    def _default_token_endpoint(self, config):
+        raise NotImplementedError
+
+    def _token_request_kwargs(self):
+        raise NotImplementedError
+
+    def _unauthorized_message(self):
+        return "{} token request rejected (HTTP 401).".format(self._GRANT_LABEL)
+
+    def _on_token_response(self, token_data):
+        """Hook for grant-specific handling of a successful token response."""
 
     def __enter__(self):
         self._refresh_access_token()
@@ -50,23 +55,13 @@ class WorkdayOAuthClient:
         pass  # no persistent session to close
 
     def _refresh_access_token(self) -> None:
-        """Exchange the refresh token for a new access token using HTTP Basic
-        authentication for client credentials.
-        """
-        LOGGER.info("Refreshing OAuth access token.")
+        """Exchange the grant-specific credentials for a new access token."""
+        LOGGER.info("Requesting %s access token.", self._GRANT_LABEL)
         try:
-            resp = requests.post(
-                self._token_endpoint,
-                auth=(self._client_id, self._client_secret),
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": self._refresh_token,
-                },
-                timeout=30,
-            )
+            resp = requests.post(self._token_endpoint, timeout=30, **self._token_request_kwargs())
         except requests.RequestException as exc:
             raise WorkdayRaasAuthenticationError(
-                "OAuth token request failed (network error): {}".format(exc)
+                "{} token request failed (network error): {}".format(self._GRANT_LABEL, exc)
             ) from exc
 
         if not resp.ok:
@@ -78,12 +73,9 @@ class WorkdayOAuthClient:
                 )
             except ValueError:
                 error_detail = None
-            message = "OAuth token request failed (HTTP {})".format(resp.status_code)
+            message = "{} token request failed (HTTP {})".format(self._GRANT_LABEL, resp.status_code)
             if resp.status_code == 401:
-                message = (
-                    "OAuth token request rejected (HTTP 401): "
-                    "verify client_id, client_secret, and refresh_token in the tap config."
-                )
+                message = self._unauthorized_message()
             if error_detail:
                 message += ": {}".format(error_detail)
             raise WorkdayRaasAuthenticationError(message)
@@ -92,7 +84,9 @@ class WorkdayOAuthClient:
             token_data = resp.json()
         except ValueError as exc:
             raise WorkdayRaasAuthenticationError(
-                "Token endpoint returned a non-JSON response during refresh."
+                "Token endpoint returned a non-JSON response during {} exchange.".format(
+                    self._GRANT_LABEL
+                )
             ) from exc
         new_token = token_data.get("access_token")
         if not new_token:
@@ -102,33 +96,9 @@ class WorkdayOAuthClient:
         expires_in = int(token_data.get("expires_in", 3600))
         self._access_token = new_token
         self._expires_at = time.monotonic() + expires_in
+        self._on_token_response(token_data)
 
-        # Workday rotates refresh tokens: persist the new one immediately so the
-        # next tap process reads the valid token from the config file.
-        new_refresh_token = token_data.get("refresh_token")
-        if new_refresh_token:
-            self._refresh_token = new_refresh_token
-            self.config["refresh_token"] = new_refresh_token
-            self._write_config(token_data)
-
-        LOGGER.info("OAuth access token refreshed successfully.")
-
-    def _write_config(self, token) -> None:
-        """Write the rotated refresh_token (and access_token) back to the config file.
-        """
-        if not self._config_path:
-            LOGGER.debug("No config_path set; skipping refresh token persistence to disk")
-            return
-        try:
-            with open(self._config_path, encoding="utf-8") as fh:
-                config = json.load(fh)
-            config["refresh_token"] = token["refresh_token"]
-            config["access_token"] = token.get("access_token", "")
-            with open(self._config_path, "w", encoding="utf-8") as fh:
-                json.dump(config, fh, indent=2)
-            LOGGER.debug("Persisted rotated refresh token to %s", self._config_path)
-        except OSError as exc:
-            LOGGER.warning("Failed to persist rotated refresh token: %s", exc)
+        LOGGER.info("%s access token obtained.", self._GRANT_LABEL)
 
     def get_access_token(self) -> str:
         """Return a valid access token, refreshing proactively when near expiry."""
@@ -155,6 +125,137 @@ class WorkdayOAuthClient:
             self._refresh_access_token()
             resp = requests.get(url, headers=self._auth_headers(), **kwargs)
         return resp
+
+
+class WorkdayOAuthClient(_WorkdayTokenAuthClientBase):
+    """Manages OAuth 2.0 token lifecycle for Workday RaaS requests using the
+    ``authorization_code`` grant (refresh_token exchange).
+
+      - Token endpoint is derived from ``hostname`` + ``tenant`` when
+        ``token_endpoint`` is not explicitly provided.
+      - Refresh uses HTTP Basic auth for ``client_id``/``client_secret``.
+      - Workday rotating refresh tokens are persisted back to the config
+        file so the next tap process uses the updated token.
+      - Use as a context manager: token is always refreshed on ``__enter__``.
+      - ``get_access_token()`` proactively refreshes 60 s before expiry.
+    """
+
+    _GRANT_LABEL = "OAuth"
+
+    def __init__(self, config, config_path=None):
+        self._client_id = config["client_id"]
+        self._client_secret = config["client_secret"]
+        self._refresh_token = config["refresh_token"]
+        super().__init__(config, config_path)
+
+    def _default_token_endpoint(self, config):
+        return "https://{}/ccx/oauth2/{}/token".format(config["hostname"], config["tenant"])
+
+    def _token_request_kwargs(self):
+        return {
+            "auth": (self._client_id, self._client_secret),
+            "data": {
+                "grant_type": "refresh_token",
+                "refresh_token": self._refresh_token,
+            },
+        }
+
+    def _unauthorized_message(self):
+        return (
+            "OAuth token request rejected (HTTP 401): "
+            "verify client_id, client_secret, and refresh_token in the tap config."
+        )
+
+    def _on_token_response(self, token_data):
+        # Workday rotates refresh tokens: persist the new one immediately so the
+        # next tap process reads the valid token from the config file.
+        new_refresh_token = token_data.get("refresh_token")
+        if new_refresh_token:
+            self._refresh_token = new_refresh_token
+            self.config["refresh_token"] = new_refresh_token
+            self._write_config(token_data)
+
+    def _write_config(self, token) -> None:
+        """Write the rotated refresh_token (and access_token) back to the config file.
+        """
+        if not self._config_path:
+            LOGGER.debug("No config_path set; skipping refresh token persistence to disk")
+            return
+        try:
+            with open(self._config_path, encoding="utf-8") as fh:
+                config = json.load(fh)
+            config["refresh_token"] = token["refresh_token"]
+            config["access_token"] = token.get("access_token", "")
+            with open(self._config_path, "w", encoding="utf-8") as fh:
+                json.dump(config, fh, indent=2)
+            LOGGER.debug("Persisted rotated refresh token to %s", self._config_path)
+        except OSError as exc:
+            LOGGER.warning("Failed to persist rotated refresh token: %s", exc)
+
+
+class WorkdayJWTBearerClient(_WorkdayTokenAuthClientBase):
+    """Manages OAuth 2.0 token lifecycle for Workday RaaS requests using the
+    JWT Bearer Token grant (RFC 7523).
+
+      - Intended for Workday Integration System User (ISU) setups where the
+        public key half of ``private_key`` has been registered in Workday -
+        no refresh token or interactive authorization step is required.
+      - Token endpoint is derived from ``jwt_hostname`` + ``jwt_tenant`` when
+        ``token_endpoint`` is not explicitly provided (same convention as
+        ``WorkdayOAuthClient``).
+      - A new short-lived JWT assertion is signed (RS256) with
+        ``private_key`` for every token request. The assertion audience is
+        the fixed value ``"wd"`` per Workday's JWT Bearer spec (not the
+        token endpoint URL).
+      - Use as a context manager: token is always fetched on ``__enter__``.
+      - ``get_access_token()`` proactively refreshes 60 s before expiry.
+    """
+
+    _GRANT_LABEL = "JWT Bearer"
+    _DEFAULT_ASSERTION_TTL_SECS = 300
+    _ASSERTION_AUDIENCE = "wd"
+
+    def __init__(self, config, config_path=None):
+        self._client_id = config["jwt_client_id"]
+        self._private_key = config["private_key"]
+        self._isu = config["isu"]
+        self._assertion_ttl_secs = int(
+            config.get("jwt_assertion_ttl_secs", self._DEFAULT_ASSERTION_TTL_SECS)
+        )
+        super().__init__(config, config_path)
+
+    def _default_token_endpoint(self, config):
+        return "https://{}/ccx/oauth2/{}/token".format(config["jwt_hostname"], config["jwt_tenant"])
+
+    def _build_assertion(self) -> str:
+        """Build and sign a short-lived JWT bearer assertion (RS256)."""
+        payload = {
+            "iss": self._client_id,
+            "sub": self._isu,
+            "aud": self._ASSERTION_AUDIENCE,
+            "exp": int(time.time()) + self._assertion_ttl_secs,
+        }
+        try:
+            return jwt.encode(payload, self._private_key, algorithm="RS256")
+        except (ValueError, TypeError, jwt.exceptions.InvalidKeyError) as exc:
+            raise WorkdayRaasAuthenticationError(
+                "Failed to sign JWT bearer assertion: {}".format(exc)
+            ) from exc
+
+    def _token_request_kwargs(self):
+        return {
+            "data": {
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": self._build_assertion(),
+            },
+        }
+
+    def _unauthorized_message(self):
+        return (
+            "JWT Bearer token request rejected (HTTP 401): verify "
+            "client_id and private_key, and that the corresponding "
+            "public key is registered on the Workday API client/ISU."
+        )
 
 
 class WorkdayBasicAuthClient:
@@ -193,6 +294,7 @@ class WorkdayBasicAuthClient:
 
 _OAUTH_REQUIRED_KEYS = ("hostname", "tenant", "client_id", "client_secret", "refresh_token")
 _BASIC_REQUIRED_KEYS = ("username", "password")
+_JWT_BEARER_REQUIRED_KEYS = ("jwt_hostname", "jwt_tenant", "jwt_client_id", "private_key", "isu")
 
 
 def create_auth_client(config, config_path=None):
@@ -201,19 +303,23 @@ def create_auth_client(config, config_path=None):
     Supported auth modes:
     - auth_method == "authorization_code": OAuth2 using
       hostname/tenant/client_id/client_secret/refresh_token.
-    - auth_method == "client_credentials": Basic Auth for backward
+    - auth_method == "basic_auth": Basic Auth for backward
       compatibility, requires username/password.
+    - auth_method == "jwt_bearer": OAuth2 JWT Bearer Token grant using
+      jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu.
 
     For legacy configs with no auth_method, choose based on complete key set:
-    OAuth2 (full OAuth keys) or Basic Auth (username/password).
+    OAuth2 (full OAuth keys) or Basic Auth (username/password). jwt_bearer
+    must be selected explicitly via auth_method, since it has no distinct
+    legacy key set to infer from.
     """
     auth_method = config.get("auth_method")
 
-    if auth_method == "client_credentials":
+    if auth_method == "basic_auth":
         missing = [k for k in _BASIC_REQUIRED_KEYS if not config.get(k)]
         if missing:
             raise WorkdayRaasAuthenticationError(
-                "auth_method is 'client_credentials' but config is missing "
+                "auth_method is 'basic_auth' but config is missing "
                 "required basic auth keys: {}.".format(missing)
             )
         return WorkdayBasicAuthClient(config)
@@ -227,6 +333,15 @@ def create_auth_client(config, config_path=None):
             )
         return WorkdayOAuthClient(config, config_path)
 
+    if auth_method == "jwt_bearer":
+        missing = [k for k in _JWT_BEARER_REQUIRED_KEYS if not config.get(k)]
+        if missing:
+            raise WorkdayRaasAuthenticationError(
+                "auth_method is 'jwt_bearer' but config is missing "
+                "required JWT Bearer keys: {}.".format(missing)
+            )
+        return WorkdayJWTBearerClient(config, config_path)
+
     has_oauth = all(config.get(k) for k in _OAUTH_REQUIRED_KEYS)
     has_basic = all(config.get(k) for k in _BASIC_REQUIRED_KEYS)
 
@@ -239,8 +354,9 @@ def create_auth_client(config, config_path=None):
     missing_basic = [k for k in _BASIC_REQUIRED_KEYS if not config.get(k)]
     raise WorkdayRaasAuthenticationError(
         "Config must provide a supported auth mode: OAuth2 "
-        "(auth_method='authorization_code' + OAuth keys) or Basic Auth "
-        "(auth_method='client_credentials' + username/password). "
+        "(auth_method='authorization_code' + OAuth keys), JWT Bearer "
+        "(auth_method='jwt_bearer' + jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu), "
+        "or Basic Auth (auth_method='basic_auth' + username/password). "
         "Missing OAuth keys: {}. Missing basic auth keys: {}.".format(
             missing_oauth, missing_basic
         )
