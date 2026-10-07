@@ -16,6 +16,9 @@ setup(
         "requests==2.34.2",
         "ijson==3.5.1",
         "PyJWT==2.14.0",
+        # Required at runtime: PyJWT's RS256 algorithm (used to sign JWT Bearer
+        # assertions) needs the cryptography backend, but PyJWT does not pull
+        # it in as a hard dependency on its own.
         "cryptography==43.0.1",
     ],
     extras_require={"dev": ["ipdb", "pylint", "nose"]},

@@ -17,8 +17,8 @@ _EXPIRY_BUFFER_SECS = 60  # refresh proactively 60 s before actual expiry
 
 class _WorkdayTokenAuthClientBase:
     """Shared OAuth 2.0 access-token lifecycle for grant types that exchange
-    a request for a Bearer access token: caching, proactive refresh 60 s
-    before expiry, and a single retry on HTTP 401/403.
+    grant credentials for a Bearer access token: caching, proactive refresh
+    60 s before expiry, and a single retry on HTTP 401/403.
 
     Subclasses provide the grant-specific pieces by implementing
     ``_default_token_endpoint()`` (derive the endpoint from config),
