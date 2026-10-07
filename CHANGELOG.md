@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1
+  * Fixes connection creation failing with `Unsupported Workday XSD datatype` errors by resolving XSD types generically from the report's schema instead of a fixed type list.
+  * Unknown or unresolvable types now fall back to string instead of failing discovery. [#37](https://github.com/singer-io/tap-workday-raas/pull/37)
+
 ## 2.0.0
   * Fixes decimal report fields being inferred as floating-point numbers by mapping `xsd:decimal` fields to `singer.decimal` strings to preserve precision.
   * Fixes connection creation for Workday reports containing `wd:RichText` fields by mapping them to string fields. [#35](https://github.com/singer-io/tap-workday-raas/pull/35)
