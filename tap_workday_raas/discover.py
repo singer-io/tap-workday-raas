@@ -81,6 +81,12 @@ def _complex_type_to_schema(complex_type, context, seen):
         return {"type": ["string"]}
 
     properties = {}
+    # complexContent/extension inherits the base type's fields; restriction redeclares them itself
+    extension = complex_type.find("./xsd:complexContent/xsd:extension[@base]", NS)
+    if extension is not None:
+        base_schema = _type_to_schema(extension.attrib["base"], context, seen)
+        properties.update(base_schema.get("properties", {}))
+
     for child in _child_elements(complex_type):
         properties[child.attrib["name"]] = _element_to_schema(child, context, seen)
     return {"type": ["null", "object"], "properties": properties}
@@ -167,8 +173,8 @@ def generate_schema_for_report(xsd):
     # (e.g. Execute_ReportType) cannot break discovery.
     entry_type = type_index.get("Report_EntryType")
     if entry_type is not None:
-        for elem in _child_elements(entry_type):
-            schema["properties"][elem.attrib["name"]] = _element_to_schema(elem, context)
+        entry_schema = _complex_type_to_schema(entry_type, context, frozenset({"Report_EntryType"}))
+        schema["properties"].update(entry_schema.get("properties", {}))
     return schema
 
 

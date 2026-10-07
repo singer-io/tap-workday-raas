@@ -487,6 +487,58 @@ class TestComplexTypeResolution(unittest.TestCase):
             '<xsd:element name="Contact" type="wd:ContactType"/>')
         self.assertEqual(set(props["Contact"]["properties"]), {"Email", "Phone", "Primary"})
 
+    def test_extension_inherits_base_type_fields(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="PersonType"><xsd:sequence>'
+            '<xsd:element name="Name" type="xsd:string" minOccurs="0"/>'
+            '<xsd:element name="Birth_Date" type="xsd:date" minOccurs="0"/>'
+            '</xsd:sequence></xsd:complexType>'
+            '<xsd:complexType name="EmployeeType"><xsd:complexContent>'
+            '<xsd:extension base="wd:PersonType"><xsd:sequence>'
+            '<xsd:element name="Employee_ID" type="xsd:string" minOccurs="0"/>'
+            '</xsd:sequence></xsd:extension>'
+            '</xsd:complexContent></xsd:complexType>',
+            '<xsd:element name="Employee" type="wd:EmployeeType" minOccurs="0"/>')
+        self.assertEqual(props["Employee"], {
+            "type": ["null", "object"],
+            "properties": {
+                "Name": {"type": ["string", "null"]},
+                "Birth_Date": {"type": ["string", "null"], "format": "date-time"},
+                "Employee_ID": {"type": ["string", "null"]},
+            },
+        })
+
+    def test_multi_level_extension_inherits_all_ancestor_fields(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="BaseType"><xsd:sequence>'
+            '<xsd:element name="A" type="xsd:string"/></xsd:sequence></xsd:complexType>'
+            '<xsd:complexType name="MiddleType"><xsd:complexContent><xsd:extension base="wd:BaseType">'
+            '<xsd:sequence><xsd:element name="B" type="xsd:string"/></xsd:sequence>'
+            '</xsd:extension></xsd:complexContent></xsd:complexType>'
+            '<xsd:complexType name="LeafType"><xsd:complexContent><xsd:extension base="wd:MiddleType">'
+            '<xsd:sequence><xsd:element name="C" type="xsd:string"/></xsd:sequence>'
+            '</xsd:extension></xsd:complexContent></xsd:complexType>',
+            '<xsd:element name="Leaf" type="wd:LeafType"/>')
+        self.assertEqual(list(props["Leaf"]["properties"]), ["A", "B", "C"])
+
+    def test_report_entry_type_extension_inherits_base_columns(self):
+        report_xsd = """<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wd="urn:com.workday.report/Test" targetNamespace="urn:com.workday.report/Test">
+    <xsd:complexType name="Base_EntryType"><xsd:sequence>
+        <xsd:element name="Inherited" type="xsd:string" minOccurs="0"/>
+    </xsd:sequence></xsd:complexType>
+    <xsd:complexType name="Report_EntryType"><xsd:complexContent>
+        <xsd:extension base="wd:Base_EntryType"><xsd:sequence>
+            <xsd:element name="Own" type="xsd:string" minOccurs="0"/>
+        </xsd:sequence></xsd:extension>
+    </xsd:complexContent></xsd:complexType>
+</xsd:schema>"""
+        props = discover.generate_schema_for_report(report_xsd)["properties"]
+        self.assertEqual(props, {
+            "Inherited": {"type": ["string", "null"]},
+            "Own": {"type": ["string", "null"]},
+        })
+
     def test_unrelated_complex_types_are_ignored(self):
         props = _schema_for_entry(
             '<xsd:complexType name="Execute_ReportType"><xsd:sequence>'
