@@ -140,7 +140,7 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
 
    ---
 
-   ### Mode 3 — Basic Auth (`auth_method: client_credentials`)
+   ### Mode 3 — Basic Auth (`auth_method: basic_auth`)
 
    Use this mode when authenticating with a Workday username and password.
 
@@ -148,13 +148,13 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
 
    | Field | Description |
    |-------|-------------|
-   | `auth_method` | Must be `"client_credentials"` |
+   | `auth_method` | Must be `"basic_auth"` |
    | `username` | Workday username |
    | `password` | Workday password |
 
    ```json
    {
-       "auth_method": "client_credentials",
+       "auth_method": "basic_auth",
        "username": "<USERNAME>",
        "password": "<PASSWORD>",
        "reports": "[{\"report_name\": \"my_report\", \"report_url\": \"https://...\"}]"

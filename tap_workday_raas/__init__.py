@@ -12,7 +12,7 @@ from tap_workday_raas.sync import sync_report
 # Only `reports` is required at the Singer tap argument level.
 # OAuth2 mode: auth_method=authorization_code + hostname/tenant/client_id/client_secret/refresh_token
 # JWT Bearer mode: auth_method=jwt_bearer + jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu
-# Basic auth mode: auth_method=client_credentials + username/password
+# Basic auth mode: auth_method=basic_auth + username/password
 REQUIRED_CONFIG_KEYS = ["reports"]
 LOGGER = singer.get_logger()
 
@@ -26,7 +26,7 @@ def _validate_auth_config(config):
 
     - auth_method == "authorization_code": requires full OAuth keys.
     - auth_method == "jwt_bearer": requires jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu.
-    - auth_method == "client_credentials": requires username/password
+    - auth_method == "basic_auth": requires username/password
 
     Legacy configs with no auth_method are still supported by inferring mode
     from complete key sets (OAuth2 or Basic Auth only; jwt_bearer requires an
@@ -34,11 +34,11 @@ def _validate_auth_config(config):
     """
     auth_method = config.get("auth_method")
 
-    if auth_method == "client_credentials":
+    if auth_method == "basic_auth":
         missing = sorted(k for k in _BASIC_AUTH_KEYS if not config.get(k))
         if missing:
             raise WorkdayRaasAuthenticationError(
-                "auth_method is 'client_credentials' but config is missing "
+                "auth_method is 'basic_auth' but config is missing "
                 "required basic auth keys: {}.".format(missing)
             )
         return

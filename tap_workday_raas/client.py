@@ -303,7 +303,7 @@ def create_auth_client(config, config_path=None):
     Supported auth modes:
     - auth_method == "authorization_code": OAuth2 using
       hostname/tenant/client_id/client_secret/refresh_token.
-    - auth_method == "client_credentials": Basic Auth for backward
+    - auth_method == "basic_auth": Basic Auth for backward
       compatibility, requires username/password.
     - auth_method == "jwt_bearer": OAuth2 JWT Bearer Token grant using
       jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu.
@@ -315,11 +315,11 @@ def create_auth_client(config, config_path=None):
     """
     auth_method = config.get("auth_method")
 
-    if auth_method == "client_credentials":
+    if auth_method == "basic_auth":
         missing = [k for k in _BASIC_REQUIRED_KEYS if not config.get(k)]
         if missing:
             raise WorkdayRaasAuthenticationError(
-                "auth_method is 'client_credentials' but config is missing "
+                "auth_method is 'basic_auth' but config is missing "
                 "required basic auth keys: {}.".format(missing)
             )
         return WorkdayBasicAuthClient(config)
@@ -356,7 +356,7 @@ def create_auth_client(config, config_path=None):
         "Config must provide a supported auth mode: OAuth2 "
         "(auth_method='authorization_code' + OAuth keys), JWT Bearer "
         "(auth_method='jwt_bearer' + jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu), "
-        "or Basic Auth (auth_method='client_credentials' + username/password). "
+        "or Basic Auth (auth_method='basic_auth' + username/password). "
         "Missing OAuth keys: {}. Missing basic auth keys: {}.".format(
             missing_oauth, missing_basic
         )
