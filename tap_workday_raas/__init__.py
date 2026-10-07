@@ -11,13 +11,13 @@ from tap_workday_raas.sync import sync_report
 
 # Only `reports` is required at the Singer tap argument level.
 # OAuth2 mode: auth_method=authorization_code + hostname/tenant/client_id/client_secret/refresh_token
-# JWT Bearer mode: auth_method=jwt_bearer + cc_hostname/cc_tenant/cc_client_id/private_key/isu
+# JWT Bearer mode: auth_method=jwt_bearer + jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu
 # Basic auth mode: auth_method=client_credentials + username/password
 REQUIRED_CONFIG_KEYS = ["reports"]
 LOGGER = singer.get_logger()
 
 _OAUTH_KEYS = {"hostname", "tenant", "client_id", "client_secret", "refresh_token"}
-_JWT_BEARER_KEYS = {"cc_hostname", "cc_tenant", "cc_client_id", "private_key", "isu"}
+_JWT_BEARER_KEYS = {"jwt_hostname", "jwt_tenant", "jwt_client_id", "private_key", "isu"}
 _BASIC_AUTH_KEYS = {"username", "password"}
 
 
@@ -25,7 +25,7 @@ def _validate_auth_config(config):
     """Validate three supported auth modes: OAuth2, JWT Bearer, and Basic Auth.
 
     - auth_method == "authorization_code": requires full OAuth keys.
-    - auth_method == "jwt_bearer": requires cc_hostname/cc_tenant/cc_client_id/private_key/isu.
+    - auth_method == "jwt_bearer": requires jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu.
     - auth_method == "client_credentials": requires username/password
 
     Legacy configs with no auth_method are still supported by inferring mode

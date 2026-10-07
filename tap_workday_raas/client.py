@@ -200,7 +200,7 @@ class WorkdayJWTBearerClient(_WorkdayTokenAuthClientBase):
       - Intended for Workday Integration System User (ISU) setups where the
         public key half of ``private_key`` has been registered in Workday -
         no refresh token or interactive authorization step is required.
-      - Token endpoint is derived from ``cc_hostname`` + ``cc_tenant`` when
+      - Token endpoint is derived from ``jwt_hostname`` + ``jwt_tenant`` when
         ``token_endpoint`` is not explicitly provided (same convention as
         ``WorkdayOAuthClient``).
       - A new short-lived JWT assertion is signed (RS256) with
@@ -216,7 +216,7 @@ class WorkdayJWTBearerClient(_WorkdayTokenAuthClientBase):
     _ASSERTION_AUDIENCE = "wd"
 
     def __init__(self, config, config_path=None):
-        self._client_id = config["cc_client_id"]
+        self._client_id = config["jwt_client_id"]
         self._private_key = config["private_key"]
         self._isu = config["isu"]
         self._assertion_ttl_secs = int(
@@ -225,7 +225,7 @@ class WorkdayJWTBearerClient(_WorkdayTokenAuthClientBase):
         super().__init__(config, config_path)
 
     def _default_token_endpoint(self, config):
-        return "https://{}/ccx/oauth2/{}/token".format(config["cc_hostname"], config["cc_tenant"])
+        return "https://{}/ccx/oauth2/{}/token".format(config["jwt_hostname"], config["jwt_tenant"])
 
     def _build_assertion(self) -> str:
         """Build and sign a short-lived JWT bearer assertion (RS256)."""
@@ -294,7 +294,7 @@ class WorkdayBasicAuthClient:
 
 _OAUTH_REQUIRED_KEYS = ("hostname", "tenant", "client_id", "client_secret", "refresh_token")
 _BASIC_REQUIRED_KEYS = ("username", "password")
-_JWT_BEARER_REQUIRED_KEYS = ("cc_hostname", "cc_tenant", "cc_client_id", "private_key", "isu")
+_JWT_BEARER_REQUIRED_KEYS = ("jwt_hostname", "jwt_tenant", "jwt_client_id", "private_key", "isu")
 
 
 def create_auth_client(config, config_path=None):
@@ -306,7 +306,7 @@ def create_auth_client(config, config_path=None):
     - auth_method == "client_credentials": Basic Auth for backward
       compatibility, requires username/password.
     - auth_method == "jwt_bearer": OAuth2 JWT Bearer Token grant using
-      cc_hostname/cc_tenant/cc_client_id/private_key/isu.
+      jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu.
 
     For legacy configs with no auth_method, choose based on complete key set:
     OAuth2 (full OAuth keys) or Basic Auth (username/password). jwt_bearer
@@ -355,7 +355,7 @@ def create_auth_client(config, config_path=None):
     raise WorkdayRaasAuthenticationError(
         "Config must provide a supported auth mode: OAuth2 "
         "(auth_method='authorization_code' + OAuth keys), JWT Bearer "
-        "(auth_method='jwt_bearer' + cc_hostname/cc_tenant/cc_client_id/private_key/isu), "
+        "(auth_method='jwt_bearer' + jwt_hostname/jwt_tenant/jwt_client_id/private_key/isu), "
         "or Basic Auth (auth_method='client_credentials' + username/password). "
         "Missing OAuth keys: {}. Missing basic auth keys: {}.".format(
             missing_oauth, missing_basic

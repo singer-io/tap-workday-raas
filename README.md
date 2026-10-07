@@ -99,9 +99,9 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
    | Field | Description |
    |-------|-------------|
    | `auth_method` | Must be `"jwt_bearer"` |
-   | `cc_hostname` | Workday hostname |
-   | `cc_tenant` | Workday tenant name |
-   | `cc_client_id` | OAuth client ID registered in Workday |
+   | `jwt_hostname` | Workday hostname |
+   | `jwt_tenant` | Workday tenant name |
+   | `jwt_client_id` | OAuth client ID registered in Workday |
    | `private_key` | PEM-encoded RSA private key used to sign the JWT assertion |
    | `isu` | Integration System User - used as the JWT `sub` claim |
 
@@ -115,9 +115,9 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
    ```json
    {
        "auth_method": "jwt_bearer",
-       "cc_hostname": "<WORKDAY_HOSTNAME>",
-       "cc_tenant": "<TENANT>",
-       "cc_client_id": "<CLIENT_ID>",
+       "jwt_hostname": "<WORKDAY_HOSTNAME>",
+       "jwt_tenant": "<TENANT>",
+       "jwt_client_id": "<CLIENT_ID>",
        "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
        "isu": "<ISU_USERNAME>",
        "reports": "[{\"report_name\": \"my_report\", \"report_url\": \"https://...\"}]"
@@ -126,11 +126,11 @@ $ tap-workday-raas --config config.json --properties properties.json --state sta
 
    #### Token request behaviour
 
-   The tap signs an RS256 JWT assertion (`iss` = `cc_client_id`, `sub` = `isu`,
+   The tap signs an RS256 JWT assertion (`iss` = `jwt_client_id`, `sub` = `isu`,
    `aud` = the fixed value `"wd"`, short `exp`) and exchanges it at:
 
    ```
-   https://<cc_hostname>/ccx/oauth2/<cc_tenant>/token
+   https://<jwt_hostname>/ccx/oauth2/<jwt_tenant>/token
    ```
 
    using `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`. The

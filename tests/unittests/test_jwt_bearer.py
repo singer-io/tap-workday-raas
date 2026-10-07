@@ -31,11 +31,11 @@ _PUBLIC_KEY_PEM = _PRIVATE_KEY.public_key().public_bytes(
 
 
 def _jwt_config(extra=None):
-    """Return a minimal valid JWT Bearer config dict using cc_hostname + cc_tenant."""
+    """Return a minimal valid JWT Bearer config dict using jwt_hostname + jwt_tenant."""
     cfg = {
-        "cc_hostname": "test.workday.com",
-        "cc_tenant": "mytenant",
-        "cc_client_id": "test-client-id",
+        "jwt_hostname": "test.workday.com",
+        "jwt_tenant": "mytenant",
+        "jwt_client_id": "test-client-id",
         "private_key": _PRIVATE_KEY_PEM,
         "isu": "test-isu",
         "reports": "[]",
@@ -311,9 +311,9 @@ class TestCreateAuthClientJWTBearer(unittest.TestCase):
     def test_returns_jwt_bearer_client_for_jwt_bearer_auth_method(self):
         cfg = {
             "auth_method": "jwt_bearer",
-            "cc_hostname": "test.workday.com",
-            "cc_tenant": "mytenant",
-            "cc_client_id": "cid",
+            "jwt_hostname": "test.workday.com",
+            "jwt_tenant": "mytenant",
+            "jwt_client_id": "cid",
             "private_key": _PRIVATE_KEY_PEM,
             "isu": "test-isu",
         }
@@ -323,9 +323,9 @@ class TestCreateAuthClientJWTBearer(unittest.TestCase):
     def test_jwt_bearer_missing_isu_raises(self):
         cfg = {
             "auth_method": "jwt_bearer",
-            "cc_hostname": "test.workday.com",
-            "cc_tenant": "mytenant",
-            "cc_client_id": "cid",
+            "jwt_hostname": "test.workday.com",
+            "jwt_tenant": "mytenant",
+            "jwt_client_id": "cid",
             "private_key": _PRIVATE_KEY_PEM,
         }
         with self.assertRaises(WorkdayRaasAuthenticationError):
@@ -334,8 +334,8 @@ class TestCreateAuthClientJWTBearer(unittest.TestCase):
     def test_jwt_bearer_missing_keys_raises(self):
         cfg = {
             "auth_method": "jwt_bearer",
-            "cc_hostname": "test.workday.com",
-            "cc_client_id": "cid",
+            "jwt_hostname": "test.workday.com",
+            "jwt_client_id": "cid",
         }
         with self.assertRaises(WorkdayRaasAuthenticationError):
             create_auth_client(cfg)
@@ -345,9 +345,9 @@ class TestCreateAuthClientJWTBearer(unittest.TestCase):
         silently resolve to a JWT Bearer client (ambiguous with legacy
         inference); it should raise since it lacks refresh_token/username."""
         cfg = {
-            "cc_hostname": "test.workday.com",
-            "cc_tenant": "mytenant",
-            "cc_client_id": "cid",
+            "jwt_hostname": "test.workday.com",
+            "jwt_tenant": "mytenant",
+            "jwt_client_id": "cid",
             "private_key": _PRIVATE_KEY_PEM,
             "isu": "test-isu",
         }
@@ -357,9 +357,9 @@ class TestCreateAuthClientJWTBearer(unittest.TestCase):
     def test_passes_config_path_to_jwt_bearer_client(self):
         cfg = {
             "auth_method": "jwt_bearer",
-            "cc_hostname": "test.workday.com",
-            "cc_tenant": "mytenant",
-            "cc_client_id": "cid",
+            "jwt_hostname": "test.workday.com",
+            "jwt_tenant": "mytenant",
+            "jwt_client_id": "cid",
             "private_key": _PRIVATE_KEY_PEM,
             "isu": "test-isu",
         }
@@ -375,9 +375,9 @@ class TestValidateAuthConfigJWTBearer(unittest.TestCase):
     def test_validate_jwt_bearer_mode(self):
         cfg = {
             "auth_method": "jwt_bearer",
-            "cc_hostname": "test.workday.com",
-            "cc_tenant": "mytenant",
-            "cc_client_id": "cid",
+            "jwt_hostname": "test.workday.com",
+            "jwt_tenant": "mytenant",
+            "jwt_client_id": "cid",
             "private_key": _PRIVATE_KEY_PEM,
             "isu": "test-isu",
             "reports": "[]",
@@ -387,9 +387,9 @@ class TestValidateAuthConfigJWTBearer(unittest.TestCase):
     def test_validate_jwt_bearer_mode_missing_private_key_fails(self):
         cfg = {
             "auth_method": "jwt_bearer",
-            "cc_hostname": "test.workday.com",
-            "cc_tenant": "mytenant",
-            "cc_client_id": "cid",
+            "jwt_hostname": "test.workday.com",
+            "jwt_tenant": "mytenant",
+            "jwt_client_id": "cid",
             "isu": "test-isu",
             "reports": "[]",
         }
@@ -399,9 +399,9 @@ class TestValidateAuthConfigJWTBearer(unittest.TestCase):
     def test_validate_jwt_bearer_mode_missing_isu_fails(self):
         cfg = {
             "auth_method": "jwt_bearer",
-            "cc_hostname": "test.workday.com",
-            "cc_tenant": "mytenant",
-            "cc_client_id": "cid",
+            "jwt_hostname": "test.workday.com",
+            "jwt_tenant": "mytenant",
+            "jwt_client_id": "cid",
             "private_key": _PRIVATE_KEY_PEM,
             "reports": "[]",
         }
