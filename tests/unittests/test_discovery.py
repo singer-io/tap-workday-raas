@@ -182,13 +182,308 @@ class TestElementToSchema(unittest.TestCase):
         result = discover._element_to_schema(self._element("xsd:boolean"))
         self.assertEqual(result, {"type": ["boolean"]})
 
-    def test_unknown_datatype_raises(self):
-        element = self._element("wd:UnknownType")
+    def test_undefined_datatype_defaults_to_string(self):
+        result = discover._element_to_schema(self._element("wd:UnknownType", minOccurs="0"))
+        self.assertEqual(result, {"type": ["string", "null"]})
 
-        with self.assertRaisesRegex(
-            ValueError, "Unsupported Workday XSD datatype"
-        ):
-            discover._element_to_schema(element)
+    def test_xsd_numeric_primitives(self):
+        self.assertEqual(discover._element_to_schema(self._element("xsd:int")), {"type": ["integer"]})
+        self.assertEqual(discover._element_to_schema(self._element("xsd:double")), {"type": ["number"]})
+
+    def test_other_xsd_primitives_default_to_string(self):
+        self.assertEqual(discover._element_to_schema(self._element("xsd:anyURI")), {"type": ["string"]})
+
+    def test_max_occurs_one_is_scalar(self):
+        self.assertEqual(discover._element_to_schema(self._element("xsd:string", maxOccurs="1")),
+                         {"type": ["string"]})
+
+
+reference_xsd = """<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wd="urn:com.workday.report/Test" elementFormDefault="qualified" attributeFormDefault="qualified" targetNamespace="urn:com.workday.report/Test">
+    <xsd:element name="Report_Data" type="wd:Report_DataType"/>
+    <xsd:element name="Execute_Report" type="wd:Execute_ReportType"/>
+    <xsd:simpleType name="Report_TypeReferenceEnumeration">
+        <xsd:restriction base="xsd:string"/>
+    </xsd:simpleType>
+    <xsd:complexType name="Report_ParametersType"><xsd:sequence/></xsd:complexType>
+    <xsd:complexType name="Execute_ReportType">
+        <xsd:sequence>
+            <xsd:element name="Report_Parameters" type="wd:Report_ParametersType" minOccurs="0"/>
+            <xsd:element name="Authentication" type="wd:AuthenticationType" minOccurs="0"/>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="AuthenticationType">
+        <xsd:sequence>
+            <xsd:element name="Proxy_User_Name" type="xsd:string" minOccurs="0" maxOccurs="1"/>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="Instance_IDType">
+        <xsd:simpleContent>
+            <xsd:extension base="xsd:string">
+                <xsd:attribute name="type" type="xsd:string"/>
+            </xsd:extension>
+        </xsd:simpleContent>
+    </xsd:complexType>
+    <xsd:complexType name="InstanceObjectType">
+        <xsd:sequence>
+            <xsd:element name="ID" type="wd:Instance_IDType" minOccurs="0" maxOccurs="unbounded"/>
+        </xsd:sequence>
+        <xsd:attribute name="Descriptor" type="xsd:string"/>
+    </xsd:complexType>
+    <xsd:complexType name="Report_TypeObjectIDType">
+        <xsd:simpleContent>
+            <xsd:extension base="xsd:string">
+                <xsd:attribute name="type" type="wd:Report_TypeReferenceEnumeration" use="required"/>
+            </xsd:extension>
+        </xsd:simpleContent>
+    </xsd:complexType>
+    <xsd:complexType name="MoneyType">
+        <xsd:simpleContent>
+            <xsd:extension base="xsd:decimal">
+                <xsd:attribute name="Currency_Code" type="xsd:string"/>
+            </xsd:extension>
+        </xsd:simpleContent>
+    </xsd:complexType>
+    <xsd:complexType name="FieldsType">
+        <xsd:sequence>
+            <xsd:element name="FieldsWID" type="xsd:string" minOccurs="0"/>
+            <xsd:element name="Category" type="wd:InstanceObjectType" minOccurs="0"/>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="Report_EntryType">
+        <xsd:sequence>
+            <xsd:element name="Related_Action_Menu_Category" type="wd:InstanceObjectType" minOccurs="0"/>
+            <xsd:element name="Report_Tags" type="wd:InstanceObjectType" minOccurs="0" maxOccurs="unbounded"/>
+            <xsd:element name="Type_ID" type="wd:Report_TypeObjectIDType" minOccurs="0"/>
+            <xsd:element name="Amount" type="wd:MoneyType" minOccurs="0"/>
+            <xsd:element name="Fields" type="wd:FieldsType" minOccurs="0" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="Report_DataType">
+        <xsd:sequence>
+            <xsd:element name="Report_Entry" type="wd:Report_EntryType" minOccurs="0" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+</xsd:schema>
+"""
+
+
+class TestGenerateSchemaWorkdayTypes(unittest.TestCase):
+    """Workday-defined reference, ID and simpleContent types are resolved generically."""
+
+    def test_reference_id_and_simple_content_types(self):
+        expected = {
+            "type": "object",
+            "properties": {
+                "Related_Action_Menu_Category": {"type": ["string", "null"]},
+                "Report_Tags": {"type": ["null", "array"], "items": {"type": ["string", "null"]}},
+                "Type_ID": {"type": ["string", "null"]},
+                "Amount": {"type": ["string", "null"], "format": "singer.decimal"},
+                "Fields": {
+                    "type": ["null", "array"],
+                    "items": {
+                        "type": ["null", "object"],
+                        "properties": {
+                            "FieldsWID": {"type": ["string", "null"]},
+                            "Category": {"type": ["string", "null"]},
+                        },
+                    },
+                },
+            },
+        }
+        self.assertEqual(expected, discover.generate_schema_for_report(reference_xsd))
+
+
+def _schema_for_entry(type_definitions, entry_elements):
+    """Build a minimal report XSD around the given type definitions and Report_EntryType elements."""
+    report_xsd = """<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wd="urn:com.workday.report/Test" targetNamespace="urn:com.workday.report/Test">
+    {types}
+    <xsd:complexType name="Report_EntryType">
+        <xsd:sequence>{elements}</xsd:sequence>
+    </xsd:complexType>
+    <xsd:complexType name="Report_DataType">
+        <xsd:sequence>
+            <xsd:element name="Report_Entry" type="wd:Report_EntryType" minOccurs="0" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+</xsd:schema>""".format(types=type_definitions, elements=entry_elements)
+    return discover.generate_schema_for_report(report_xsd)["properties"]
+
+
+class TestSimpleTypeResolution(unittest.TestCase):
+    """Named xsd:simpleType definitions resolve to the schema of their restriction base."""
+
+    def test_string_restriction_resolves_to_string(self):
+        props = _schema_for_entry(
+            '<xsd:simpleType name="RichText"><xsd:restriction base="xsd:string"/></xsd:simpleType>',
+            '<xsd:element name="Notes" type="wd:RichText" minOccurs="0"/>')
+        self.assertEqual(props["Notes"], {"type": ["string", "null"]})
+
+    def test_enumeration_resolves_to_string(self):
+        props = _schema_for_entry(
+            '<xsd:simpleType name="Status_Enumeration"><xsd:restriction base="xsd:string">'
+            '<xsd:enumeration value="Active"/><xsd:enumeration value="Inactive"/>'
+            '</xsd:restriction></xsd:simpleType>',
+            '<xsd:element name="Status" type="wd:Status_Enumeration"/>')
+        self.assertEqual(props["Status"], {"type": ["string"]})
+
+    def test_decimal_restriction_resolves_to_singer_decimal(self):
+        props = _schema_for_entry(
+            '<xsd:simpleType name="Rate"><xsd:restriction base="xsd:decimal"/></xsd:simpleType>',
+            '<xsd:element name="Rate" type="wd:Rate" minOccurs="0"/>')
+        self.assertEqual(props["Rate"], {"type": ["string", "null"], "format": "singer.decimal"})
+
+    def test_chained_simple_types_resolve_to_final_base(self):
+        props = _schema_for_entry(
+            '<xsd:simpleType name="Base_Date"><xsd:restriction base="xsd:date"/></xsd:simpleType>'
+            '<xsd:simpleType name="Hire_Date"><xsd:restriction base="wd:Base_Date"/></xsd:simpleType>',
+            '<xsd:element name="Hire_Date" type="wd:Hire_Date" minOccurs="0"/>')
+        self.assertEqual(props["Hire_Date"], {"type": ["string", "null"], "format": "date-time"})
+
+    def test_list_simple_type_resolves_to_string(self):
+        props = _schema_for_entry(
+            '<xsd:simpleType name="Codes"><xsd:list itemType="xsd:string"/></xsd:simpleType>',
+            '<xsd:element name="Codes" type="wd:Codes"/>')
+        self.assertEqual(props["Codes"], {"type": ["string"]})
+
+    def test_inline_simple_type(self):
+        props = _schema_for_entry(
+            '',
+            '<xsd:element name="Flag"><xsd:simpleType>'
+            '<xsd:restriction base="xsd:boolean"/></xsd:simpleType></xsd:element>')
+        self.assertEqual(props["Flag"], {"type": ["boolean"]})
+
+
+class TestComplexTypeResolution(unittest.TestCase):
+    """Named xsd:complexType definitions resolve to scalar, reference or nested-object schemas."""
+
+    def test_simple_content_id_type_resolves_to_base_string(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="Instance_IDType"><xsd:simpleContent>'
+            '<xsd:extension base="xsd:string"><xsd:attribute name="type" type="xsd:string"/></xsd:extension>'
+            '</xsd:simpleContent></xsd:complexType>',
+            '<xsd:element name="ID" type="wd:Instance_IDType" minOccurs="0"/>')
+        self.assertEqual(props["ID"], {"type": ["string", "null"]})
+
+    def test_simple_content_money_type_resolves_to_decimal(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="MoneyType"><xsd:simpleContent>'
+            '<xsd:extension base="xsd:decimal"><xsd:attribute name="Currency_Code" type="xsd:string"/></xsd:extension>'
+            '</xsd:simpleContent></xsd:complexType>',
+            '<xsd:element name="Salary" type="wd:MoneyType" minOccurs="0"/>')
+        self.assertEqual(props["Salary"], {"type": ["string", "null"], "format": "singer.decimal"})
+
+    def test_simple_content_based_on_named_simple_type(self):
+        props = _schema_for_entry(
+            '<xsd:simpleType name="Code_Enumeration"><xsd:restriction base="xsd:string"/></xsd:simpleType>'
+            '<xsd:complexType name="Code_IDType"><xsd:simpleContent>'
+            '<xsd:extension base="wd:Code_Enumeration"/></xsd:simpleContent></xsd:complexType>',
+            '<xsd:element name="Code" type="wd:Code_IDType"/>')
+        self.assertEqual(props["Code"], {"type": ["string"]})
+
+    def test_reference_object_type_resolves_to_string(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="Instance_IDType"><xsd:simpleContent>'
+            '<xsd:extension base="xsd:string"/></xsd:simpleContent></xsd:complexType>'
+            '<xsd:complexType name="InstanceObjectType"><xsd:sequence>'
+            '<xsd:element name="ID" type="wd:Instance_IDType" minOccurs="0" maxOccurs="unbounded"/>'
+            '</xsd:sequence><xsd:attribute name="Descriptor" type="xsd:string"/></xsd:complexType>',
+            '<xsd:element name="Owner" type="wd:InstanceObjectType" minOccurs="0"/>'
+            '<xsd:element name="Tags" type="wd:InstanceObjectType" minOccurs="0" maxOccurs="unbounded"/>')
+        self.assertEqual(props["Owner"], {"type": ["string", "null"]})
+        self.assertEqual(props["Tags"], {"type": ["null", "array"], "items": {"type": ["string", "null"]}})
+
+    def test_group_type_resolves_to_nested_object(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="FieldsType"><xsd:sequence>'
+            '<xsd:element name="FieldName" type="xsd:string" minOccurs="0"/>'
+            '<xsd:element name="Is_Active" type="xsd:boolean" minOccurs="0"/>'
+            '<xsd:element name="Created" type="xsd:dateTime" minOccurs="0"/>'
+            '</xsd:sequence></xsd:complexType>',
+            '<xsd:element name="Fields" type="wd:FieldsType" minOccurs="0" maxOccurs="unbounded"/>')
+        self.assertEqual(props["Fields"], {
+            "type": ["null", "array"],
+            "items": {
+                "type": ["null", "object"],
+                "properties": {
+                    "FieldName": {"type": ["string", "null"]},
+                    "Is_Active": {"type": ["boolean", "null"]},
+                    "Created": {"type": ["string", "null"], "format": "date-time"},
+                },
+            },
+        })
+
+    def test_nested_group_containing_reference_and_group(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="Business_ObjectObjectType"><xsd:sequence/>'
+            '<xsd:attribute name="Descriptor" type="xsd:string"/></xsd:complexType>'
+            '<xsd:complexType name="InnerType"><xsd:sequence>'
+            '<xsd:element name="Code" type="xsd:string" minOccurs="0"/>'
+            '</xsd:sequence></xsd:complexType>'
+            '<xsd:complexType name="OuterType"><xsd:sequence>'
+            '<xsd:element name="BusinessObject" type="wd:Business_ObjectObjectType" minOccurs="0"/>'
+            '<xsd:element name="Inner" type="wd:InnerType" minOccurs="0"/>'
+            '</xsd:sequence></xsd:complexType>',
+            '<xsd:element name="Outer" type="wd:OuterType" minOccurs="0"/>')
+        self.assertEqual(props["Outer"], {
+            "type": ["null", "object"],
+            "properties": {
+                "BusinessObject": {"type": ["string", "null"]},
+                "Inner": {"type": ["null", "object"], "properties": {"Code": {"type": ["string", "null"]}}},
+            },
+        })
+
+    def test_inline_complex_type(self):
+        props = _schema_for_entry(
+            '',
+            '<xsd:element name="Address" minOccurs="0"><xsd:complexType><xsd:sequence>'
+            '<xsd:element name="City" type="xsd:string" minOccurs="0"/>'
+            '</xsd:sequence></xsd:complexType></xsd:element>')
+        self.assertEqual(props["Address"], {
+            "type": ["null", "object"],
+            "properties": {"City": {"type": ["string", "null"]}},
+        })
+
+    def test_recursive_complex_type_falls_back_to_string(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="NodeType"><xsd:sequence>'
+            '<xsd:element name="Name" type="xsd:string" minOccurs="0"/>'
+            '<xsd:element name="Child" type="wd:NodeType" minOccurs="0"/>'
+            '</xsd:sequence></xsd:complexType>',
+            '<xsd:element name="Node" type="wd:NodeType" minOccurs="0"/>')
+        self.assertEqual(props["Node"], {
+            "type": ["null", "object"],
+            "properties": {
+                "Name": {"type": ["string", "null"]},
+                "Child": {"type": ["string", "null"]},
+            },
+        })
+
+    def test_unrelated_complex_types_are_ignored(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="Execute_ReportType"><xsd:sequence>'
+            '<xsd:element name="Authentication" type="wd:UndefinedType" minOccurs="0"/>'
+            '</xsd:sequence></xsd:complexType>',
+            '<xsd:element name="Name" type="xsd:string"/>')
+        self.assertEqual(props, {"Name": {"type": ["string"]}})
+
+    def test_customer_xsd_generates_schema(self):
+        """The Pima County WD_Custom_Reports XSD that previously failed on Instance_IDType."""
+        import os
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "Qlik_Extract_-_WD_Custom_Reports_XSD.xml")
+        if not os.path.exists(path):
+            self.skipTest("customer XSD fixture not present")
+        with open(path, encoding="utf-8") as f:
+            props = discover.generate_schema_for_report(f.read())["properties"]
+        self.assertEqual(props["Related_Action_Menu_Category"], {"type": ["string", "null"]})
+        self.assertEqual(props["ReportOwner"], {"type": ["string", "null"]})
+        self.assertEqual(props["BusinessObject"], {
+            "type": ["null", "object"],
+            "properties": {"BusinessObject": {"type": ["string", "null"]}},
+        })
+        self.assertEqual(props["CreatedOn"], {"type": ["string", "null"], "format": "date-time"})
+        self.assertEqual(props["Shared"], {"type": ["boolean", "null"]})
 
 
 class TestInferSchemaFromValue(unittest.TestCase):
