@@ -1,6 +1,7 @@
 import base64
 import json
 import time
+import jwt
 import requests
 import ijson.backends.yajl2_c as ijson
 import ijson as ijson_core
@@ -157,6 +158,149 @@ class WorkdayOAuthClient:
         return resp
 
 
+class WorkdayJWTBearerClient:
+    """Manages OAuth 2.0 token lifecycle for Workday RaaS requests using the
+    JWT Bearer Token grant (RFC 7523).
+
+      - Intended for Workday Integration System User (ISU) setups where the
+        public key half of ``private_key`` has been registered in Workday -
+        no refresh token or interactive authorization step is required.
+      - Token endpoint is derived from ``hostname`` + ``tenant`` when
+        ``token_endpoint`` is not explicitly provided (same convention as
+        ``WorkdayOAuthClient``).
+      - A new short-lived JWT assertion is signed (RS256) with
+        ``private_key`` for every token request. The assertion audience is
+        the fixed value ``"wd"`` per Workday's JWT Bearer spec (not the
+        token endpoint URL).
+      - Use as a context manager: token is always fetched on ``__enter__``.
+      - ``get_access_token()`` proactively refreshes 60 s before expiry.
+    """
+
+    _DEFAULT_ASSERTION_TTL_SECS = 300
+    _ASSERTION_AUDIENCE = "wd"
+
+    def __init__(self, config, config_path=None):
+        self.config = config
+        self._config_path = config_path
+        # Derive token endpoint from hostname + tenant when not explicitly set.
+        self._token_endpoint = config.get("token_endpoint") or (
+            "https://{}/ccx/oauth2/{}/token".format(
+                config["hostname"], config["tenant"]
+            )
+        )
+        self._client_id = config["client_id"]
+        self._private_key = config["private_key"]
+        self._isu = config["isu"]
+        self._assertion_ttl_secs = int(
+            config.get("jwt_assertion_ttl_secs", self._DEFAULT_ASSERTION_TTL_SECS)
+        )
+        self._access_token = None
+        self._expires_at = 0.0
+
+    def __enter__(self):
+        self._refresh_access_token()
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        pass  # no persistent session to close
+
+    def _build_assertion(self) -> str:
+        """Build and sign a short-lived JWT bearer assertion (RS256)."""
+        payload = {
+            "iss": self._client_id,
+            "sub": self._isu,
+            "aud": self._ASSERTION_AUDIENCE,
+            "exp": int(time.time()) + self._assertion_ttl_secs,
+        }
+        try:
+            return jwt.encode(payload, self._private_key, algorithm="RS256")
+        except (ValueError, TypeError, jwt.exceptions.InvalidKeyError) as exc:
+            raise WorkdayRaasAuthenticationError(
+                "Failed to sign JWT bearer assertion: {}".format(exc)
+            ) from exc
+
+    def _refresh_access_token(self) -> None:
+        """Exchange a freshly-signed JWT assertion for a new access token."""
+        LOGGER.info("Requesting OAuth access token via JWT Bearer grant.")
+        assertion = self._build_assertion()
+        try:
+            resp = requests.post(
+                self._token_endpoint,
+                data={
+                    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                    "assertion": assertion,
+                },
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            raise WorkdayRaasAuthenticationError(
+                "JWT Bearer token request failed (network error): {}".format(exc)
+            ) from exc
+
+        if not resp.ok:
+            try:
+                error_data = resp.json()
+                error_detail = (
+                    error_data.get("error_description")
+                    or error_data.get("error")
+                )
+            except ValueError:
+                error_detail = None
+            message = "JWT Bearer token request failed (HTTP {})".format(resp.status_code)
+            if resp.status_code == 401:
+                message = (
+                    "JWT Bearer token request rejected (HTTP 401): verify "
+                    "client_id and private_key, and that the corresponding "
+                    "public key is registered on the Workday API client/ISU."
+                )
+            if error_detail:
+                message += ": {}".format(error_detail)
+            raise WorkdayRaasAuthenticationError(message)
+
+        try:
+            token_data = resp.json()
+        except ValueError as exc:
+            raise WorkdayRaasAuthenticationError(
+                "Token endpoint returned a non-JSON response during JWT Bearer exchange."
+            ) from exc
+        new_token = token_data.get("access_token")
+        if not new_token:
+            raise WorkdayRaasAuthenticationError(
+                "Token endpoint response is missing the 'access_token' field."
+            )
+        expires_in = int(token_data.get("expires_in", 3600))
+        self._access_token = new_token
+        self._expires_at = time.monotonic() + expires_in
+
+        LOGGER.info("OAuth access token obtained via JWT Bearer grant.")
+
+    def get_access_token(self) -> str:
+        """Return a valid access token, refreshing proactively when near expiry."""
+        if (
+            self._access_token
+            and time.monotonic() < self._expires_at - _EXPIRY_BUFFER_SECS
+        ):
+            return self._access_token
+        self._refresh_access_token()
+        return self._access_token
+
+    def _auth_headers(self):
+        return {"Authorization": "Bearer {}".format(self.get_access_token())}
+
+    def get(self, url, **kwargs):
+        """Make an authenticated GET request, retrying once on 401/403."""
+        resp = requests.get(url, headers=self._auth_headers(), **kwargs)
+        if resp.status_code in _AUTH_FAILURE_CODES:
+            resp.close()
+            LOGGER.info(
+                "Access token rejected (HTTP %s). Attempting token refresh.",
+                resp.status_code,
+            )
+            self._refresh_access_token()
+            resp = requests.get(url, headers=self._auth_headers(), **kwargs)
+        return resp
+
+
 class WorkdayBasicAuthClient:
     """Authenticates Workday RaaS requests using HTTP Basic auth (username + password).
 
@@ -193,6 +337,7 @@ class WorkdayBasicAuthClient:
 
 _OAUTH_REQUIRED_KEYS = ("hostname", "tenant", "client_id", "client_secret", "refresh_token")
 _BASIC_REQUIRED_KEYS = ("username", "password")
+_JWT_BEARER_REQUIRED_KEYS = ("hostname", "tenant", "client_id", "private_key", "isu")
 
 
 def create_auth_client(config, config_path=None):
@@ -203,9 +348,13 @@ def create_auth_client(config, config_path=None):
       hostname/tenant/client_id/client_secret/refresh_token.
     - auth_method == "client_credentials": Basic Auth for backward
       compatibility, requires username/password.
+    - auth_method == "jwt_bearer": OAuth2 JWT Bearer Token grant using
+      hostname/tenant/client_id/private_key/isu.
 
     For legacy configs with no auth_method, choose based on complete key set:
-    OAuth2 (full OAuth keys) or Basic Auth (username/password).
+    OAuth2 (full OAuth keys) or Basic Auth (username/password). jwt_bearer
+    must be selected explicitly via auth_method, since it has no distinct
+    legacy key set to infer from.
     """
     auth_method = config.get("auth_method")
 
@@ -227,6 +376,15 @@ def create_auth_client(config, config_path=None):
             )
         return WorkdayOAuthClient(config, config_path)
 
+    if auth_method == "jwt_bearer":
+        missing = [k for k in _JWT_BEARER_REQUIRED_KEYS if not config.get(k)]
+        if missing:
+            raise WorkdayRaasAuthenticationError(
+                "auth_method is 'jwt_bearer' but config is missing "
+                "required JWT Bearer keys: {}.".format(missing)
+            )
+        return WorkdayJWTBearerClient(config, config_path)
+
     has_oauth = all(config.get(k) for k in _OAUTH_REQUIRED_KEYS)
     has_basic = all(config.get(k) for k in _BASIC_REQUIRED_KEYS)
 
@@ -239,8 +397,9 @@ def create_auth_client(config, config_path=None):
     missing_basic = [k for k in _BASIC_REQUIRED_KEYS if not config.get(k)]
     raise WorkdayRaasAuthenticationError(
         "Config must provide a supported auth mode: OAuth2 "
-        "(auth_method='authorization_code' + OAuth keys) or Basic Auth "
-        "(auth_method='client_credentials' + username/password). "
+        "(auth_method='authorization_code' + OAuth keys), JWT Bearer "
+        "(auth_method='jwt_bearer' + hostname/tenant/client_id/private_key/isu), "
+        "or Basic Auth (auth_method='client_credentials' + username/password). "
         "Missing OAuth keys: {}. Missing basic auth keys: {}.".format(
             missing_oauth, missing_basic
         )

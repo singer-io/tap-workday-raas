@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name="tap-workday-raas",
-    version="2.0.0",
+    version="2.1.0",
     description="Singer.io tap for extracting data",
     author="Stitch",
     url="http://singer.io",
@@ -14,6 +14,8 @@ setup(
         "backoff==2.2.1",
         "requests==2.34.2",
         "ijson==3.5.1",
+        "PyJWT==2.9.0",
+        "cryptography==43.0.1",
     ],
     extras_require={"dev": ["ipdb", "pylint", "nose"]},
     entry_points="""

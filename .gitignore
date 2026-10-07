@@ -152,6 +152,9 @@ Thumbs.db
 # vi
 *~
 
+# Temporary
+tmp/
+
 # General
 log/
 *.log
