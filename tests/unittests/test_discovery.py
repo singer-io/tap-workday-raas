@@ -460,6 +460,33 @@ class TestComplexTypeResolution(unittest.TestCase):
             },
         })
 
+    def test_inline_complex_type_children_do_not_leak_to_parent(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="WorkerType"><xsd:sequence>'
+            '<xsd:element name="Name" type="xsd:string" minOccurs="0"/>'
+            '<xsd:element name="Address" minOccurs="0"><xsd:complexType><xsd:sequence>'
+            '<xsd:element name="City" type="xsd:string" minOccurs="0"/>'
+            '</xsd:sequence></xsd:complexType></xsd:element>'
+            '</xsd:sequence></xsd:complexType>',
+            '<xsd:element name="Worker" type="wd:WorkerType" minOccurs="0"/>')
+        self.assertEqual(props["Worker"], {
+            "type": ["null", "object"],
+            "properties": {
+                "Name": {"type": ["string", "null"]},
+                "Address": {"type": ["null", "object"], "properties": {"City": {"type": ["string", "null"]}}},
+            },
+        })
+
+    def test_choice_and_nested_sequence_elements_are_included(self):
+        props = _schema_for_entry(
+            '<xsd:complexType name="ContactType"><xsd:sequence>'
+            '<xsd:choice><xsd:element name="Email" type="xsd:string"/>'
+            '<xsd:element name="Phone" type="xsd:string"/></xsd:choice>'
+            '<xsd:sequence><xsd:element name="Primary" type="xsd:boolean"/></xsd:sequence>'
+            '</xsd:sequence></xsd:complexType>',
+            '<xsd:element name="Contact" type="wd:ContactType"/>')
+        self.assertEqual(set(props["Contact"]["properties"]), {"Email", "Phone", "Primary"})
+
     def test_unrelated_complex_types_are_ignored(self):
         props = _schema_for_entry(
             '<xsd:complexType name="Execute_ReportType"><xsd:sequence>'
@@ -484,6 +511,39 @@ class TestComplexTypeResolution(unittest.TestCase):
         })
         self.assertEqual(props["CreatedOn"], {"type": ["string", "null"], "format": "date-time"})
         self.assertEqual(props["Shared"], {"type": ["boolean", "null"]})
+
+
+class TestXsdNamespacePrefix(unittest.TestCase):
+    """Built-in types are recognised by the XSD namespace URI, not a hardcoded prefix."""
+
+    def test_custom_prefix_bound_to_xsd_namespace(self):
+        custom_prefix_xsd = """<?xml version="1.0" encoding="UTF-8"?>
+<s:schema xmlns:s="http://www.w3.org/2001/XMLSchema" xmlns:wd="urn:com.workday.report/Test" targetNamespace="urn:com.workday.report/Test">
+    <s:complexType name="Report_EntryType">
+        <s:sequence>
+            <s:element name="Active" type="s:boolean" minOccurs="0"/>
+            <s:element name="Count" type="s:int"/>
+            <s:element name="Hired" type="s:date"/>
+        </s:sequence>
+    </s:complexType>
+</s:schema>"""
+        props = discover.generate_schema_for_report(custom_prefix_xsd)["properties"]
+        self.assertEqual(props, {
+            "Active": {"type": ["boolean", "null"]},
+            "Count": {"type": ["integer"]},
+            "Hired": {"type": ["string"], "format": "date-time"},
+        })
+
+    def test_xsd_prefix_bound_to_other_namespace_is_not_builtin(self):
+        other_ns_xsd = """<?xml version="1.0" encoding="UTF-8"?>
+<x:schema xmlns:x="http://www.w3.org/2001/XMLSchema" xmlns:xsd="urn:not-xsd" targetNamespace="urn:not-xsd">
+    <x:simpleType name="boolean"><x:restriction base="x:string"/></x:simpleType>
+    <x:complexType name="Report_EntryType">
+        <x:sequence><x:element name="Flag" type="xsd:boolean"/></x:sequence>
+    </x:complexType>
+</x:schema>"""
+        props = discover.generate_schema_for_report(other_ns_xsd)["properties"]
+        self.assertEqual(props, {"Flag": {"type": ["string"]}})
 
 
 class TestInferSchemaFromValue(unittest.TestCase):

@@ -1,4 +1,5 @@
 import json
+from collections import namedtuple
 from xml.etree import ElementTree
 import singer
 import requests
@@ -25,7 +26,15 @@ def _sanitize_response_text(text, max_length=500):
 
 XSD_NAMESPACE = "http://www.w3.org/2001/XMLSchema"
 NS = {"xsd": XSD_NAMESPACE}
-XSD_PREFIXES = ("xsd", "xs")
+_ELEMENT_TAG = "{%s}element" % XSD_NAMESPACE
+_CONTENT_MODEL_TAGS = {
+    "{%s}%s" % (XSD_NAMESPACE, tag)
+    for tag in ("sequence", "choice", "all", "complexContent", "extension", "restriction")
+}
+
+# type_index: name -> top-level simpleType/complexType; xsd_prefixes: prefixes bound to XSD_NAMESPACE
+_SchemaContext = namedtuple("_SchemaContext", ["type_index", "xsd_prefixes"])
+_DEFAULT_CONTEXT = _SchemaContext({}, frozenset({"xsd", "xs"}))
 
 _DATETIME_TYPES = {"date", "dateTime"}
 _INTEGER_TYPES = {
@@ -51,66 +60,75 @@ def _primitive_to_schema(type_name):
     return {"type": ["string"]}
 
 
-def _complex_type_to_schema(complex_type, type_index, seen):
+def _child_elements(node):
+    """Yield element declarations of a content model without descending into nested inline types."""
+    for child in node:
+        if child.tag == _ELEMENT_TAG:
+            if "name" in child.attrib:
+                yield child
+        elif child.tag in _CONTENT_MODEL_TAGS:
+            yield from _child_elements(child)
+
+
+def _complex_type_to_schema(complex_type, context, seen):
     # simpleContent types (e.g. *_IDType, MoneyType) carry a scalar value of their base type
     content = complex_type.find("./xsd:simpleContent/*[@base]", NS)
     if content is not None:
-        return _type_to_schema(content.attrib["base"], type_index, seen)
+        return _type_to_schema(content.attrib["base"], context, seen)
 
     # Workday instance references (*ObjectType) are emitted as their Descriptor text in RaaS JSON
     if complex_type.find("./xsd:attribute[@name='Descriptor']", NS) is not None:
         return {"type": ["string"]}
 
     properties = {}
-    for child in complex_type.findall(".//xsd:element[@name]", NS):
-        properties[child.attrib["name"]] = _element_to_schema(child, type_index, seen)
+    for child in _child_elements(complex_type):
+        properties[child.attrib["name"]] = _element_to_schema(child, context, seen)
     return {"type": ["null", "object"], "properties": properties}
 
 
-def _simple_type_to_schema(simple_type, type_index, seen):
+def _simple_type_to_schema(simple_type, context, seen):
     restriction = simple_type.find("./xsd:restriction[@base]", NS)
     if restriction is None:
         # xsd:list / xsd:union simple types are rendered as text
         return {"type": ["string"]}
-    return _type_to_schema(restriction.attrib["base"], type_index, seen)
+    return _type_to_schema(restriction.attrib["base"], context, seen)
 
 
-def _type_to_schema(qualified_type, type_index, seen):
+def _type_to_schema(qualified_type, context, seen):
     prefix, _, type_name = qualified_type.rpartition(":")
-    if prefix in XSD_PREFIXES:
+    if prefix in context.xsd_prefixes:
         return _primitive_to_schema(type_name)
 
     if type_name in seen:
         LOGGER.warning('Recursive XSD type "%s" detected; defaulting to string.', qualified_type)
         return {"type": ["string"]}
 
-    definition = type_index.get(type_name)
+    definition = context.type_index.get(type_name)
     if definition is None:
         LOGGER.warning('XSD type "%s" is not defined in the schema; defaulting to string.', qualified_type)
         return {"type": ["string"]}
 
     seen = seen | {type_name}
     if definition.tag == "{%s}simpleType" % XSD_NAMESPACE:
-        return _simple_type_to_schema(definition, type_index, seen)
-    return _complex_type_to_schema(definition, type_index, seen)
+        return _simple_type_to_schema(definition, context, seen)
+    return _complex_type_to_schema(definition, context, seen)
 
 
-def _element_to_schema(element, type_index=None, seen=frozenset()):
-    type_index = type_index or {}
+def _element_to_schema(element, context=_DEFAULT_CONTEXT, seen=frozenset()):
     is_nullable = element.attrib.get("minOccurs") == "0"
 
     max_occurs = element.attrib.get("maxOccurs")
     is_list = max_occurs == "unbounded" or (max_occurs is not None and max_occurs.isdigit() and int(max_occurs) > 1)
 
     if "type" in element.attrib:
-        schema = _type_to_schema(element.attrib["type"], type_index, seen)
+        schema = _type_to_schema(element.attrib["type"], context, seen)
     else:
         inline_complex = element.find("./xsd:complexType", NS)
         inline_simple = element.find("./xsd:simpleType", NS)
         if inline_complex is not None:
-            schema = _complex_type_to_schema(inline_complex, type_index, seen)
+            schema = _complex_type_to_schema(inline_complex, context, seen)
         elif inline_simple is not None:
-            schema = _simple_type_to_schema(inline_simple, type_index, seen)
+            schema = _simple_type_to_schema(inline_simple, context, seen)
         else:
             schema = {"type": ["string"]}
 
@@ -126,6 +144,13 @@ def _element_to_schema(element, type_index=None, seen=frozenset()):
     return schema
 
 
+def _xsd_namespace_prefixes(xsd):
+    parser = ElementTree.XMLPullParser(events=("start-ns",))
+    parser.feed(xsd)
+    parser.close()
+    return frozenset(prefix for _, (prefix, uri) in parser.read_events() if uri == XSD_NAMESPACE)
+
+
 def generate_schema_for_report(xsd):
     xsd_schema_et = ElementTree.fromstring(xsd)
 
@@ -134,13 +159,16 @@ def generate_schema_for_report(xsd):
         for definition in list(xsd_schema_et.findall("./xsd:simpleType[@name]", NS))
         + list(xsd_schema_et.findall("./xsd:complexType[@name]", NS))
     }
+    context = _SchemaContext(type_index, _xsd_namespace_prefixes(xsd))
 
     schema = {"type": "object", "properties": {}}
 
     # Only types reachable from Report_EntryType are resolved, so unrelated definitions
     # (e.g. Execute_ReportType) cannot break discovery.
-    for elem in xsd_schema_et.findall("./xsd:complexType[@name='Report_EntryType']/xsd:sequence/xsd:element", NS):
-        schema["properties"][elem.attrib["name"]] = _element_to_schema(elem, type_index)
+    entry_type = type_index.get("Report_EntryType")
+    if entry_type is not None:
+        for elem in _child_elements(entry_type):
+            schema["properties"][elem.attrib["name"]] = _element_to_schema(elem, context)
     return schema
 
 
