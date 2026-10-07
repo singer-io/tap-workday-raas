@@ -15,7 +15,119 @@ _AUTH_FAILURE_CODES = (401, 403)
 _EXPIRY_BUFFER_SECS = 60  # refresh proactively 60 s before actual expiry
 
 
-class WorkdayOAuthClient:
+class _WorkdayTokenAuthClientBase:
+    """Shared OAuth 2.0 access-token lifecycle for grant types that exchange
+    a request for a Bearer access token: caching, proactive refresh 60 s
+    before expiry, and a single retry on HTTP 401/403.
+
+    Subclasses provide the grant-specific pieces by implementing
+    ``_default_token_endpoint()`` (derive the endpoint from config),
+    ``_token_request_kwargs()`` (the ``requests.post`` kwargs for the grant),
+    and optionally ``_unauthorized_message()`` / ``_on_token_response()``.
+    """
+
+    _GRANT_LABEL = "OAuth"
+
+    def __init__(self, config, config_path=None):
+        self.config = config
+        self._config_path = config_path
+        self._token_endpoint = config.get("token_endpoint") or self._default_token_endpoint(config)
+        self._access_token = None
+        self._expires_at = 0.0
+
+    def _default_token_endpoint(self, config):
+        raise NotImplementedError
+
+    def _token_request_kwargs(self):
+        raise NotImplementedError
+
+    def _unauthorized_message(self):
+        return "{} token request rejected (HTTP 401).".format(self._GRANT_LABEL)
+
+    def _on_token_response(self, token_data):
+        """Hook for grant-specific handling of a successful token response."""
+
+    def __enter__(self):
+        self._refresh_access_token()
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        pass  # no persistent session to close
+
+    def _refresh_access_token(self) -> None:
+        """Exchange the grant-specific credentials for a new access token."""
+        LOGGER.info("Requesting %s access token.", self._GRANT_LABEL)
+        try:
+            resp = requests.post(self._token_endpoint, timeout=30, **self._token_request_kwargs())
+        except requests.RequestException as exc:
+            raise WorkdayRaasAuthenticationError(
+                "{} token request failed (network error): {}".format(self._GRANT_LABEL, exc)
+            ) from exc
+
+        if not resp.ok:
+            try:
+                error_data = resp.json()
+                error_detail = (
+                    error_data.get("error_description")
+                    or error_data.get("error")
+                )
+            except ValueError:
+                error_detail = None
+            message = "{} token request failed (HTTP {})".format(self._GRANT_LABEL, resp.status_code)
+            if resp.status_code == 401:
+                message = self._unauthorized_message()
+            if error_detail:
+                message += ": {}".format(error_detail)
+            raise WorkdayRaasAuthenticationError(message)
+
+        try:
+            token_data = resp.json()
+        except ValueError as exc:
+            raise WorkdayRaasAuthenticationError(
+                "Token endpoint returned a non-JSON response during {} exchange.".format(
+                    self._GRANT_LABEL
+                )
+            ) from exc
+        new_token = token_data.get("access_token")
+        if not new_token:
+            raise WorkdayRaasAuthenticationError(
+                "Token endpoint response is missing the 'access_token' field."
+            )
+        expires_in = int(token_data.get("expires_in", 3600))
+        self._access_token = new_token
+        self._expires_at = time.monotonic() + expires_in
+        self._on_token_response(token_data)
+
+        LOGGER.info("%s access token obtained.", self._GRANT_LABEL)
+
+    def get_access_token(self) -> str:
+        """Return a valid access token, refreshing proactively when near expiry."""
+        if (
+            self._access_token
+            and time.monotonic() < self._expires_at - _EXPIRY_BUFFER_SECS
+        ):
+            return self._access_token
+        self._refresh_access_token()
+        return self._access_token
+
+    def _auth_headers(self):
+        return {"Authorization": "Bearer {}".format(self.get_access_token())}
+
+    def get(self, url, **kwargs):
+        """Make an authenticated GET request, retrying once on 401/403."""
+        resp = requests.get(url, headers=self._auth_headers(), **kwargs)
+        if resp.status_code in _AUTH_FAILURE_CODES:
+            resp.close()
+            LOGGER.info(
+                "Access token rejected (HTTP %s). Attempting token refresh.",
+                resp.status_code,
+            )
+            self._refresh_access_token()
+            resp = requests.get(url, headers=self._auth_headers(), **kwargs)
+        return resp
+
+
+class WorkdayOAuthClient(_WorkdayTokenAuthClientBase):
     """Manages OAuth 2.0 token lifecycle for Workday RaaS requests using the
     ``authorization_code`` grant (refresh_token exchange).
 
@@ -28,82 +140,33 @@ class WorkdayOAuthClient:
       - ``get_access_token()`` proactively refreshes 60 s before expiry.
     """
 
+    _GRANT_LABEL = "OAuth"
+
     def __init__(self, config, config_path=None):
-        self.config = config
-        self._config_path = config_path
-        # Derive token endpoint from hostname + tenant when not explicitly set.
-        self._token_endpoint = config.get("token_endpoint") or (
-            "https://{}/ccx/oauth2/{}/token".format(
-                config["hostname"], config["tenant"]
-            )
-        )
         self._client_id = config["client_id"]
         self._client_secret = config["client_secret"]
         self._refresh_token = config["refresh_token"]
-        self._access_token = None
-        self._expires_at = 0.0
+        super().__init__(config, config_path)
 
-    def __enter__(self):
-        self._refresh_access_token()
-        return self
+    def _default_token_endpoint(self, config):
+        return "https://{}/ccx/oauth2/{}/token".format(config["hostname"], config["tenant"])
 
-    def __exit__(self, exception_type, exception_value, traceback):
-        pass  # no persistent session to close
+    def _token_request_kwargs(self):
+        return {
+            "auth": (self._client_id, self._client_secret),
+            "data": {
+                "grant_type": "refresh_token",
+                "refresh_token": self._refresh_token,
+            },
+        }
 
-    def _refresh_access_token(self) -> None:
-        """Exchange the refresh token for a new access token using HTTP Basic
-        authentication for client credentials.
-        """
-        LOGGER.info("Refreshing OAuth access token.")
-        try:
-            resp = requests.post(
-                self._token_endpoint,
-                auth=(self._client_id, self._client_secret),
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": self._refresh_token,
-                },
-                timeout=30,
-            )
-        except requests.RequestException as exc:
-            raise WorkdayRaasAuthenticationError(
-                "OAuth token request failed (network error): {}".format(exc)
-            ) from exc
+    def _unauthorized_message(self):
+        return (
+            "OAuth token request rejected (HTTP 401): "
+            "verify client_id, client_secret, and refresh_token in the tap config."
+        )
 
-        if not resp.ok:
-            try:
-                error_data = resp.json()
-                error_detail = (
-                    error_data.get("error_description")
-                    or error_data.get("error")
-                )
-            except ValueError:
-                error_detail = None
-            message = "OAuth token request failed (HTTP {})".format(resp.status_code)
-            if resp.status_code == 401:
-                message = (
-                    "OAuth token request rejected (HTTP 401): "
-                    "verify client_id, client_secret, and refresh_token in the tap config."
-                )
-            if error_detail:
-                message += ": {}".format(error_detail)
-            raise WorkdayRaasAuthenticationError(message)
-
-        try:
-            token_data = resp.json()
-        except ValueError as exc:
-            raise WorkdayRaasAuthenticationError(
-                "Token endpoint returned a non-JSON response during refresh."
-            ) from exc
-        new_token = token_data.get("access_token")
-        if not new_token:
-            raise WorkdayRaasAuthenticationError(
-                "Token endpoint response is missing the 'access_token' field."
-            )
-        expires_in = int(token_data.get("expires_in", 3600))
-        self._access_token = new_token
-        self._expires_at = time.monotonic() + expires_in
-
+    def _on_token_response(self, token_data):
         # Workday rotates refresh tokens: persist the new one immediately so the
         # next tap process reads the valid token from the config file.
         new_refresh_token = token_data.get("refresh_token")
@@ -111,8 +174,6 @@ class WorkdayOAuthClient:
             self._refresh_token = new_refresh_token
             self.config["refresh_token"] = new_refresh_token
             self._write_config(token_data)
-
-        LOGGER.info("OAuth access token refreshed successfully.")
 
     def _write_config(self, token) -> None:
         """Write the rotated refresh_token (and access_token) back to the config file.
@@ -131,34 +192,8 @@ class WorkdayOAuthClient:
         except OSError as exc:
             LOGGER.warning("Failed to persist rotated refresh token: %s", exc)
 
-    def get_access_token(self) -> str:
-        """Return a valid access token, refreshing proactively when near expiry."""
-        if (
-            self._access_token
-            and time.monotonic() < self._expires_at - _EXPIRY_BUFFER_SECS
-        ):
-            return self._access_token
-        self._refresh_access_token()
-        return self._access_token
 
-    def _auth_headers(self):
-        return {"Authorization": "Bearer {}".format(self.get_access_token())}
-
-    def get(self, url, **kwargs):
-        """Make an authenticated GET request, retrying once on 401/403."""
-        resp = requests.get(url, headers=self._auth_headers(), **kwargs)
-        if resp.status_code in _AUTH_FAILURE_CODES:
-            resp.close()
-            LOGGER.info(
-                "Access token rejected (HTTP %s). Attempting token refresh.",
-                resp.status_code,
-            )
-            self._refresh_access_token()
-            resp = requests.get(url, headers=self._auth_headers(), **kwargs)
-        return resp
-
-
-class WorkdayJWTBearerClient:
+class WorkdayJWTBearerClient(_WorkdayTokenAuthClientBase):
     """Manages OAuth 2.0 token lifecycle for Workday RaaS requests using the
     JWT Bearer Token grant (RFC 7523).
 
@@ -176,33 +211,21 @@ class WorkdayJWTBearerClient:
       - ``get_access_token()`` proactively refreshes 60 s before expiry.
     """
 
+    _GRANT_LABEL = "JWT Bearer"
     _DEFAULT_ASSERTION_TTL_SECS = 300
     _ASSERTION_AUDIENCE = "wd"
 
     def __init__(self, config, config_path=None):
-        self.config = config
-        self._config_path = config_path
-        # Derive token endpoint from cc_hostname + cc_tenant when not explicitly set.
-        self._token_endpoint = config.get("token_endpoint") or (
-            "https://{}/ccx/oauth2/{}/token".format(
-                config["cc_hostname"], config["cc_tenant"]
-            )
-        )
         self._client_id = config["cc_client_id"]
         self._private_key = config["private_key"]
         self._isu = config["isu"]
         self._assertion_ttl_secs = int(
             config.get("jwt_assertion_ttl_secs", self._DEFAULT_ASSERTION_TTL_SECS)
         )
-        self._access_token = None
-        self._expires_at = 0.0
+        super().__init__(config, config_path)
 
-    def __enter__(self):
-        self._refresh_access_token()
-        return self
-
-    def __exit__(self, exception_type, exception_value, traceback):
-        pass  # no persistent session to close
+    def _default_token_endpoint(self, config):
+        return "https://{}/ccx/oauth2/{}/token".format(config["cc_hostname"], config["cc_tenant"])
 
     def _build_assertion(self) -> str:
         """Build and sign a short-lived JWT bearer assertion (RS256)."""
@@ -219,86 +242,20 @@ class WorkdayJWTBearerClient:
                 "Failed to sign JWT bearer assertion: {}".format(exc)
             ) from exc
 
-    def _refresh_access_token(self) -> None:
-        """Exchange a freshly-signed JWT assertion for a new access token."""
-        LOGGER.info("Requesting OAuth access token via JWT Bearer grant.")
-        assertion = self._build_assertion()
-        try:
-            resp = requests.post(
-                self._token_endpoint,
-                data={
-                    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                    "assertion": assertion,
-                },
-                timeout=30,
-            )
-        except requests.RequestException as exc:
-            raise WorkdayRaasAuthenticationError(
-                "JWT Bearer token request failed (network error): {}".format(exc)
-            ) from exc
+    def _token_request_kwargs(self):
+        return {
+            "data": {
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": self._build_assertion(),
+            },
+        }
 
-        if not resp.ok:
-            try:
-                error_data = resp.json()
-                error_detail = (
-                    error_data.get("error_description")
-                    or error_data.get("error")
-                )
-            except ValueError:
-                error_detail = None
-            message = "JWT Bearer token request failed (HTTP {})".format(resp.status_code)
-            if resp.status_code == 401:
-                message = (
-                    "JWT Bearer token request rejected (HTTP 401): verify "
-                    "client_id and private_key, and that the corresponding "
-                    "public key is registered on the Workday API client/ISU."
-                )
-            if error_detail:
-                message += ": {}".format(error_detail)
-            raise WorkdayRaasAuthenticationError(message)
-
-        try:
-            token_data = resp.json()
-        except ValueError as exc:
-            raise WorkdayRaasAuthenticationError(
-                "Token endpoint returned a non-JSON response during JWT Bearer exchange."
-            ) from exc
-        new_token = token_data.get("access_token")
-        if not new_token:
-            raise WorkdayRaasAuthenticationError(
-                "Token endpoint response is missing the 'access_token' field."
-            )
-        expires_in = int(token_data.get("expires_in", 3600))
-        self._access_token = new_token
-        self._expires_at = time.monotonic() + expires_in
-
-        LOGGER.info("OAuth access token obtained via JWT Bearer grant.")
-
-    def get_access_token(self) -> str:
-        """Return a valid access token, refreshing proactively when near expiry."""
-        if (
-            self._access_token
-            and time.monotonic() < self._expires_at - _EXPIRY_BUFFER_SECS
-        ):
-            return self._access_token
-        self._refresh_access_token()
-        return self._access_token
-
-    def _auth_headers(self):
-        return {"Authorization": "Bearer {}".format(self.get_access_token())}
-
-    def get(self, url, **kwargs):
-        """Make an authenticated GET request, retrying once on 401/403."""
-        resp = requests.get(url, headers=self._auth_headers(), **kwargs)
-        if resp.status_code in _AUTH_FAILURE_CODES:
-            resp.close()
-            LOGGER.info(
-                "Access token rejected (HTTP %s). Attempting token refresh.",
-                resp.status_code,
-            )
-            self._refresh_access_token()
-            resp = requests.get(url, headers=self._auth_headers(), **kwargs)
-        return resp
+    def _unauthorized_message(self):
+        return (
+            "JWT Bearer token request rejected (HTTP 401): verify "
+            "client_id and private_key, and that the corresponding "
+            "public key is registered on the Workday API client/ISU."
+        )
 
 
 class WorkdayBasicAuthClient:
