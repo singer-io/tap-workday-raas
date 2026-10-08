@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.1
+  * Fixes connection creation failing with `Unsupported Workday XSD datatype` errors by resolving XSD types generically from the report's schema instead of a fixed type list.
+  * Unknown or unresolvable types now fall back to string instead of failing discovery. [#37](https://github.com/singer-io/tap-workday-raas/pull/37)
+
 ## 2.1.0
   * Adds OAuth 2.0 JWT Bearer Token authentication (`auth_method: jwt_bearer`), for Workday Integration System User / API client setups that sign a short-lived JWT assertion with an RSA private key instead of using a refresh token. [#36](https://github.com/singer-io/tap-workday-raas/pull/36)
 

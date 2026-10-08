@@ -1,4 +1,5 @@
 import json
+from collections import namedtuple
 from xml.etree import ElementTree
 import singer
 import requests
@@ -23,32 +24,121 @@ def _sanitize_response_text(text, max_length=500):
     return sanitized
 
 
-def _element_to_schema(element):
-    elem_type = element.attrib["type"].split(":")[1]
+XSD_NAMESPACE = "http://www.w3.org/2001/XMLSchema"
+NS = {"xsd": XSD_NAMESPACE}
+_ELEMENT_TAG = "{%s}element" % XSD_NAMESPACE
+_CONTENT_MODEL_TAGS = {
+    "{%s}%s" % (XSD_NAMESPACE, tag)
+    for tag in ("sequence", "choice", "all", "complexContent", "extension", "restriction")
+}
+
+# type_index: name -> top-level simpleType/complexType; xsd_prefixes: prefixes bound to XSD_NAMESPACE
+_SchemaContext = namedtuple("_SchemaContext", ["type_index", "xsd_prefixes"])
+_DEFAULT_CONTEXT = _SchemaContext({}, frozenset({"xsd", "xs"}))
+
+_DATETIME_TYPES = {"date", "dateTime"}
+_INTEGER_TYPES = {
+    "integer", "int", "long", "short", "byte",
+    "nonNegativeInteger", "nonPositiveInteger", "positiveInteger", "negativeInteger",
+    "unsignedLong", "unsignedInt", "unsignedShort", "unsignedByte",
+}
+_FLOAT_TYPES = {"float", "double"}
+
+
+def _primitive_to_schema(type_name):
+    """Map a built-in XSD datatype to a JSON schema. Non-numeric/boolean/date types are text."""
+    if type_name in _DATETIME_TYPES:
+        return {"type": ["string"], "format": "date-time"}
+    if type_name == "decimal":
+        return {"type": ["string"], "format": "singer.decimal"}
+    if type_name in _INTEGER_TYPES:
+        return {"type": ["integer"]}
+    if type_name in _FLOAT_TYPES:
+        return {"type": ["number"]}
+    if type_name == "boolean":
+        return {"type": ["boolean"]}
+    return {"type": ["string"]}
+
+
+def _child_elements(node):
+    """Yield element declarations of a content model without descending into nested inline types."""
+    for child in node:
+        if child.tag == _ELEMENT_TAG:
+            if "name" in child.attrib:
+                yield child
+        elif child.tag in _CONTENT_MODEL_TAGS:
+            yield from _child_elements(child)
+
+
+def _complex_type_to_schema(complex_type, context, seen):
+    # simpleContent types (e.g. *_IDType, MoneyType) carry a scalar value of their base type
+    content = complex_type.find("./xsd:simpleContent/*[@base]", NS)
+    if content is not None:
+        return _type_to_schema(content.attrib["base"], context, seen)
+
+    # Workday instance references (*ObjectType) are emitted as their Descriptor text in RaaS JSON
+    if complex_type.find("./xsd:attribute[@name='Descriptor']", NS) is not None:
+        return {"type": ["string"]}
+
+    properties = {}
+    # complexContent/extension inherits the base type's fields; restriction redeclares them itself
+    extension = complex_type.find("./xsd:complexContent/xsd:extension[@base]", NS)
+    if extension is not None:
+        base_schema = _type_to_schema(extension.attrib["base"], context, seen)
+        properties.update(base_schema.get("properties", {}))
+
+    for child in _child_elements(complex_type):
+        properties[child.attrib["name"]] = _element_to_schema(child, context, seen)
+    return {"type": ["null", "object"], "properties": properties}
+
+
+def _simple_type_to_schema(simple_type, context, seen):
+    restriction = simple_type.find("./xsd:restriction[@base]", NS)
+    if restriction is None:
+        # xsd:list / xsd:union simple types are rendered as text
+        return {"type": ["string"]}
+    return _type_to_schema(restriction.attrib["base"], context, seen)
+
+
+def _type_to_schema(qualified_type, context, seen):
+    prefix, _, type_name = qualified_type.rpartition(":")
+    if prefix in context.xsd_prefixes:
+        return _primitive_to_schema(type_name)
+
+    if type_name in seen:
+        LOGGER.warning('Recursive XSD type "%s" detected; defaulting to string.', qualified_type)
+        return {"type": ["string"]}
+
+    definition = context.type_index.get(type_name)
+    if definition is None:
+        LOGGER.warning('XSD type "%s" is not defined in the schema; defaulting to string.', qualified_type)
+        return {"type": ["string"]}
+
+    seen = seen | {type_name}
+    if definition.tag == "{%s}simpleType" % XSD_NAMESPACE:
+        return _simple_type_to_schema(definition, context, seen)
+    return _complex_type_to_schema(definition, context, seen)
+
+
+def _element_to_schema(element, context=_DEFAULT_CONTEXT, seen=frozenset()):
     is_nullable = element.attrib.get("minOccurs") == "0"
 
     max_occurs = element.attrib.get("maxOccurs")
-    if max_occurs not in (None, "unbounded"):
-        raise Exception("Found unexpected value for maxOccurs attribute: '{}'".format(max_occurs))
+    is_list = max_occurs == "unbounded" or (max_occurs is not None and max_occurs.isdigit() and int(max_occurs) > 1)
 
-    is_list = max_occurs == "unbounded"
-
-    schema = {}
-
-    if elem_type in ("date", "dateTime"):
-        schema = {"type": ["string"], "format": "date-time"}
-    elif elem_type == "decimal":
-        schema = {"type": ["string"], "format": "singer.decimal"}
-    elif elem_type == "RichText":
-        schema = {"type": ["string"]}
-    elif elem_type == "string":
-        schema = {"type": ["string"]}
-    elif elem_type == "boolean":
-        schema = {"type": ["boolean"]}
+    if "type" in element.attrib:
+        schema = _type_to_schema(element.attrib["type"], context, seen)
     else:
-        raise ValueError("Unsupported Workday XSD datatype: '{}'".format(elem_type))
+        inline_complex = element.find("./xsd:complexType", NS)
+        inline_simple = element.find("./xsd:simpleType", NS)
+        if inline_complex is not None:
+            schema = _complex_type_to_schema(inline_complex, context, seen)
+        elif inline_simple is not None:
+            schema = _simple_type_to_schema(inline_simple, context, seen)
+        else:
+            schema = {"type": ["string"]}
 
-    if is_nullable:
+    if is_nullable and "null" not in schema["type"]:
         schema["type"].append("null")
 
     if is_list:
@@ -60,63 +150,31 @@ def _element_to_schema(element):
     return schema
 
 
-def parse_complex_type(complex_type_selectors, xsd_schema_et, ns):
-    complex_type_mapping = {}
-    for selector in complex_type_selectors:
-        complex_type = xsd_schema_et.find(selector, ns)
-        name = complex_type.attrib["name"]
-        complex_type_mapping[name] = {"type": ["null", "object"], "properties": {}}
-        for element in complex_type.findall(".//xsd:element", ns):
-            elem_name = element.attrib["name"]
-            schema_type = _element_to_schema(element)
-            complex_type_mapping[name]["properties"][elem_name] = {**schema_type}
-
-    return complex_type_mapping
+def _xsd_namespace_prefixes(xsd):
+    parser = ElementTree.XMLPullParser(events=("start-ns",))
+    parser.feed(xsd)
+    parser.close()
+    return frozenset(prefix for _, (prefix, uri) in parser.read_events() if uri == XSD_NAMESPACE)
 
 
 def generate_schema_for_report(xsd):
     xsd_schema_et = ElementTree.fromstring(xsd)
-    ns = {"xsd": "http://www.w3.org/2001/XMLSchema"}
+
+    type_index = {
+        definition.attrib["name"]: definition
+        for definition in list(xsd_schema_et.findall("./xsd:simpleType[@name]", NS))
+        + list(xsd_schema_et.findall("./xsd:complexType[@name]", NS))
+    }
+    context = _SchemaContext(type_index, _xsd_namespace_prefixes(xsd))
 
     schema = {"type": "object", "properties": {}}
 
-    # The report structure is defined by two complexType elements
-    report_structure_elem_names = {"Report_EntryType", "Report_DataType"}
-    all_complex_type_names = {e.attrib["name"] for e in xsd_schema_et.findall("./xsd:complexType", ns)}
-
-    # The set difference results in complexType elements that are used in Report_EntryType to define nested objects
-    complex_types = all_complex_type_names - report_structure_elem_names
-
-    # Compute JSON Schemas for other complexType elements which will become nested objects
-    complex_type_mapping = parse_complex_type(["./xsd:complexType[@name='{}']".format(i) for i in complex_types],xsd_schema_et,ns,)
-
-    # Iterate the 'element' elements nested under the sequence element of the Report definition's complexType
-    for elem in xsd_schema_et.findall("./xsd:complexType[@name='Report_EntryType']/xsd:sequence/xsd:element", ns):
-        elem_type = elem.attrib["type"].split(":")[1]
-        elem_name = elem.attrib["name"]
-
-        # When elem's type attribute is a type defined as its own complexType - a nested object
-        if elem_type in complex_type_mapping:
-
-            max_occurs = elem.attrib.get("maxOccurs")
-            if max_occurs not in (None, "unbounded"):
-                raise Exception("Found unexpected value for maxOccurs attribute: '{}'".format(max_occurs))
-
-            is_list = max_occurs == "unbounded"
-            is_nullable = elem.attrib.get("minOccurs") == "0"
-
-            if is_list:
-                if is_nullable:
-                    elem_schema = {"type": ["null", "array"], "items": complex_type_mapping[elem_type]}
-                else:
-                    elem_schema = {"type": "array", "items": complex_type_mapping[elem_type]}
-            else:
-                elem_schema = complex_type_mapping[elem_type]
-            schema["properties"][elem_name] = elem_schema
-        else:
-            schema_type = _element_to_schema(elem)
-
-            schema["properties"][elem_name] = {**schema_type}
+    # Only types reachable from Report_EntryType are resolved, so unrelated definitions
+    # (e.g. Execute_ReportType) cannot break discovery.
+    entry_type = type_index.get("Report_EntryType")
+    if entry_type is not None:
+        entry_schema = _complex_type_to_schema(entry_type, context, frozenset({"Report_EntryType"}))
+        schema["properties"].update(entry_schema.get("properties", {}))
     return schema
 
 

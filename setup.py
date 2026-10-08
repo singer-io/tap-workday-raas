@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name="tap-workday-raas",
-    version="2.1.0",
+    version="2.1.1",
     description="Singer.io tap for extracting data",
     author="Stitch",
     url="http://singer.io",
@@ -15,7 +15,7 @@ setup(
         "backoff==2.2.1",
         "requests==2.34.2",
         "ijson==3.5.1",
-        "PyJWT==2.14.0",
+        "PyJWT==2.15.0",
         # Required at runtime: PyJWT's RS256 algorithm (used to sign JWT Bearer
         # assertions) needs the cryptography backend, but PyJWT does not pull
         # it in as a hard dependency on its own.
