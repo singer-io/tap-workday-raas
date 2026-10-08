@@ -715,18 +715,18 @@ class TestCreateAuthClientFactory(unittest.TestCase):
         client = create_auth_client(cfg)
         self.assertIsInstance(client, WorkdayOAuthClient)
 
-    def test_returns_basic_auth_client_for_client_credentials_auth_method(self):
+    def test_returns_basic_auth_client_for_basic_auth_auth_method(self):
         cfg = {
-            "auth_method": "client_credentials",
+            "auth_method": "basic_auth",
             "username": "user",
             "password": "pass",
         }
         client = create_auth_client(cfg)
         self.assertIsInstance(client, WorkdayBasicAuthClient)
 
-    def test_client_credentials_auth_method_with_oauth_keys_raises(self):
+    def test_basic_auth_auth_method_with_oauth_keys_raises(self):
         cfg = {
-            "auth_method": "client_credentials",
+            "auth_method": "basic_auth",
             "hostname": "test.workday.com",
             "tenant": "mytenant",
             "client_id": "cid",
@@ -782,18 +782,18 @@ class TestValidateAuthConfig(unittest.TestCase):
         }
         _validate_auth_config(cfg)
 
-    def test_validate_client_credentials_mode_requires_basic_auth(self):
+    def test_validate_basic_auth_mode_requires_basic_auth(self):
         cfg = {
-            "auth_method": "client_credentials",
+            "auth_method": "basic_auth",
             "username": "user",
             "password": "pass",
             "reports": "[]",
         }
         _validate_auth_config(cfg)
 
-    def test_validate_client_credentials_mode_with_oauth_keys_fails(self):
+    def test_validate_basic_auth_mode_with_oauth_keys_fails(self):
         cfg = {
-            "auth_method": "client_credentials",
+            "auth_method": "basic_auth",
             "hostname": "test.workday.com",
             "tenant": "mytenant",
             "client_id": "cid",
