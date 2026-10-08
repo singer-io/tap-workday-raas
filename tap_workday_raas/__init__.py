@@ -34,7 +34,7 @@ def _validate_auth_config(config):
     """
     auth_method = config.get("auth_method")
 
-    if auth_method == "basic_auth":
+    if auth_method in ["basic_auth", "client_credentials"]:
         missing = sorted(k for k in _BASIC_AUTH_KEYS if not config.get(k))
         if missing:
             raise WorkdayRaasAuthenticationError(

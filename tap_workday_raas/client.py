@@ -315,7 +315,7 @@ def create_auth_client(config, config_path=None):
     """
     auth_method = config.get("auth_method")
 
-    if auth_method == "basic_auth":
+    if auth_method in ["basic_auth", "client_credentials"]:
         missing = [k for k in _BASIC_REQUIRED_KEYS if not config.get(k)]
         if missing:
             raise WorkdayRaasAuthenticationError(
