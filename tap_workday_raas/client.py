@@ -1,18 +1,39 @@
 import base64
+import io
 import json
 import time
+from contextlib import closing
+import backoff
 import jwt
 import requests
 import ijson.backends.yajl2_c as ijson
 import ijson as ijson_core
 import singer
+from urllib3.exceptions import ProtocolError
 
-from tap_workday_raas.exceptions import WorkdayRaasAuthenticationError
+from tap_workday_raas.exceptions import (
+    WorkdayRaasAuthenticationError,
+    WorkdayRaasReportTooLargeError,
+)
 
 LOGGER = singer.get_logger()
 
 _AUTH_FAILURE_CODES = (401, 403)
 _EXPIRY_BUFFER_SECS = 60  # refresh proactively 60 s before actual expiry
+
+_PARSE_CHUNK_SIZE = 512
+_DOWNLOAD_CHUNK_SIZE = 64 * 1024
+_MAX_DOWNLOAD_TRIES = 5
+# Upper bound on the in-memory report buffer. Placeholder until the runtime
+# memory limit and the largest customer report sizes are confirmed.
+MAX_REPORT_BYTES = 1024 * 1024 * 1024
+_RETRYABLE_DOWNLOAD_ERRORS = (
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    ProtocolError,
+    ConnectionResetError,
+)
 
 
 class _WorkdayTokenAuthClientBase:
@@ -363,31 +384,16 @@ def create_auth_client(config, config_path=None):
     )
 
 
-def stream_report(report_url, auth_client):
-    # Force the format query param to be set to format=json
+def _iter_report_chunks(url, auth_client, chunk_size):
+    """Yield raw body chunks from an authenticated streaming report request.
 
-    # Split query params off
-    url_breakdown = report_url.split("?")
-
-    # Gather all params that are not format
-    if len(url_breakdown) == 1:
-        params = []
-    else:
-        params = [x for x in url_breakdown[1].split("&") if not x.startswith("format=")]
-
-    # Add the format param
-    params.append("format=json")
-    param_string = "&".join(params)
-
-    # Put the url back together
-    corrected_url = url_breakdown[0] + "?" + param_string
-
-    # Open authenticated streaming request.  Authentication is checked before
-    # any response body is consumed so that we can safely retry with a
-    # refreshed token without risking a partially-consumed stream.
+    The only retry here is a single token refresh on 401/403, which is safe
+    because it happens before any response body is consumed. Failures while
+    reading the body propagate to the caller.
+    """
     def _open_stream():
         return requests.get(
-            corrected_url,
+            url,
             headers=auth_client._auth_headers(),
             stream=True,
         )
@@ -410,6 +416,84 @@ def stream_report(report_url, auth_client):
             _ = resp.content
         resp.raise_for_status()
 
+        for chunk in resp.iter_content(chunk_size=chunk_size):
+            yield chunk
+
+
+def _log_download_retry(details):
+    LOGGER.warning(
+        "Report download interrupted (%s). Retrying full download in %.1f s "
+        "(attempt %d of %d).",
+        details.get("exception"),
+        details["wait"],
+        details["tries"] + 1,
+        _MAX_DOWNLOAD_TRIES,
+    )
+
+
+@backoff.on_exception(
+    backoff.expo,
+    _RETRYABLE_DOWNLOAD_ERRORS,
+    max_tries=_MAX_DOWNLOAD_TRIES,
+    factor=2,
+    on_backoff=_log_download_retry,
+)
+def _download_report(url, auth_client):
+    """Download the complete report body into an in-memory buffer.
+
+    No records are emitted until the whole body has arrived, so a dropped
+    connection is retried with a fresh request without duplicating or losing
+    records. The body is held in process memory only and never written to disk.
+    """
+    max_bytes = MAX_REPORT_BYTES
+    buffer = io.BytesIO()
+    for chunk in _iter_report_chunks(url, auth_client, _DOWNLOAD_CHUNK_SIZE):
+        if buffer.tell() + len(chunk) > max_bytes:
+            buffer.close()
+            raise WorkdayRaasReportTooLargeError(
+                "Report exceeds the maximum supported size of {} bytes.".format(max_bytes)
+            )
+        buffer.write(chunk)
+
+    LOGGER.info("Downloaded report (%d bytes).", buffer.tell())
+    buffer.seek(0)
+    return buffer
+
+
+def stream_report(report_url, auth_client, buffered=True):
+    """Yield report records.
+
+    With ``buffered=True`` (used by sync) the full report is downloaded into
+    memory, with retries, before any record is yielded. With
+    ``buffered=False`` (used by discovery sampling) records are parsed
+    directly from the network stream so callers can stop early.
+    """
+    # Force the format query param to be set to format=json
+
+    # Split query params off
+    url_breakdown = report_url.split("?")
+
+    # Gather all params that are not format
+    if len(url_breakdown) == 1:
+        params = []
+    else:
+        params = [x for x in url_breakdown[1].split("&") if not x.startswith("format=")]
+
+    # Add the format param
+    params.append("format=json")
+    param_string = "&".join(params)
+
+    # Put the url back together
+    corrected_url = url_breakdown[0] + "?" + param_string
+
+    if buffered:
+        body = _download_report(corrected_url, auth_client)
+        chunks = iter(lambda: body.read(_PARSE_CHUNK_SIZE), b"")
+    else:
+        body = _iter_report_chunks(corrected_url, auth_client, _PARSE_CHUNK_SIZE)
+        chunks = body
+
+    with closing(body):
         # Set up our search key
         report_entry_key = b"Report_Entry"
         search_prefix = report_entry_key.decode("utf-8") + ".item"
@@ -433,7 +517,7 @@ def stream_report(report_url, auth_client):
         found_report_entry = False
         response_is_json_object = False
 
-        for chunk in resp.iter_content(chunk_size=512):
+        for chunk in chunks:
             coro.send(chunk)
             key_coro.send(chunk)
 

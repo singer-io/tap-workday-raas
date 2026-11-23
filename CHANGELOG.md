@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.1.2
+  * Fixes syncs failing with `Connection broken: IncompleteRead` when the connection drops mid-download. Reports are now downloaded fully into memory (never to disk) before any records are emitted, and interrupted downloads are retried from the start with exponential backoff (up to 5 attempts), so retries cannot duplicate or skip records.
+
 ## 2.1.1
   * Fixes connection creation failing with `Unsupported Workday XSD datatype` errors by resolving XSD types generically from the report's schema instead of a fixed type list.
   * Unknown or unresolvable types now fall back to string instead of failing discovery. [#37](https://github.com/singer-io/tap-workday-raas/pull/37)
