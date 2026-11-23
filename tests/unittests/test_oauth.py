@@ -11,10 +11,7 @@ from tap_workday_raas.client import (
     WorkdayOAuthClient, WorkdayBasicAuthClient, create_auth_client,
     stream_report, download_xsd,
 )
-from tap_workday_raas.exceptions import (
-    WorkdayRaasAuthenticationError,
-    WorkdayRaasReportTooLargeError,
-)
+from tap_workday_raas.exceptions import WorkdayRaasAuthenticationError
 
 
 # ---------------------------------------------------------------------------
@@ -501,68 +498,6 @@ class TestExpiredAccessTokenRetry(unittest.TestCase):
         mock_get.return_value = _make_ok_streaming_response(body)
         list(stream_report("http://fake", _make_client()))
         mock_post.assert_not_called()
-        self.assertEqual(mock_get.call_count, 1)
-
-
-# ---------------------------------------------------------------------------
-# Interrupted report downloads (SAC-32691)
-# ---------------------------------------------------------------------------
-
-_TWO_RECORD_BODY = json.dumps({"Report_Entry": [{"id": "1"}, {"id": "2"}]}).encode()
-
-
-def _make_interrupted_response(body_bytes):
-    """Streaming response that delivers all but the last few bytes, then drops."""
-    def _chunks(chunk_size=None):
-        yield body_bytes[:-5]
-        raise requests.exceptions.ChunkedEncodingError(
-            "Connection broken: IncompleteRead(505 bytes read, 7 more expected)"
-        )
-
-    resp = _make_ok_streaming_response(body_bytes)
-    resp.iter_content.side_effect = _chunks
-    return resp
-
-
-@patch("time.sleep")
-class TestInterruptedReportDownload(unittest.TestCase):
-
-    @patch("tap_workday_raas.client.requests.get")
-    def test_mid_body_drop_is_retried_without_duplicates(self, mock_get, _sleep):
-        mock_get.side_effect = [
-            _make_interrupted_response(_TWO_RECORD_BODY),
-            _make_ok_streaming_response(_TWO_RECORD_BODY),
-        ]
-        records = list(stream_report("http://fake", _make_client()))
-        self.assertEqual(records, [{"id": "1"}, {"id": "2"}])
-        self.assertEqual(mock_get.call_count, 2)
-
-    @patch("tap_workday_raas.client.requests.get")
-    def test_no_records_emitted_when_retries_exhausted(self, mock_get, _sleep):
-        mock_get.side_effect = lambda *a, **kw: _make_interrupted_response(_TWO_RECORD_BODY)
-        emitted = []
-        with self.assertRaises(requests.exceptions.ChunkedEncodingError):
-            for record in stream_report("http://fake", _make_client()):
-                emitted.append(record)
-        self.assertEqual(emitted, [])
-        self.assertEqual(mock_get.call_count, 5)
-
-    @patch("tap_workday_raas.client.MAX_REPORT_BYTES", 10)
-    @patch("tap_workday_raas.client.requests.get")
-    def test_report_over_size_cap_fails_without_retry(self, mock_get, _sleep):
-        mock_get.return_value = _make_ok_streaming_response(_TWO_RECORD_BODY)
-        with self.assertRaises(WorkdayRaasReportTooLargeError):
-            list(stream_report("http://fake", _make_client()))
-        self.assertEqual(mock_get.call_count, 1)
-
-    @patch("tap_workday_raas.client.requests.get")
-    def test_unbuffered_stream_is_not_retried(self, mock_get, _sleep):
-        mock_get.return_value = _make_interrupted_response(_TWO_RECORD_BODY)
-        emitted = []
-        with self.assertRaises(requests.exceptions.ChunkedEncodingError):
-            for record in stream_report("http://fake", _make_client(), buffered=False):
-                emitted.append(record)
-        self.assertEqual(emitted, [{"id": "1"}])
         self.assertEqual(mock_get.call_count, 1)
 
 

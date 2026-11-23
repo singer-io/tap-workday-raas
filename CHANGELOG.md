@@ -1,7 +1,7 @@
 # Changelog
 
 ## 2.1.2
-  * Fixes syncs failing with `Connection broken: IncompleteRead` when the connection drops mid-download. Reports are now downloaded fully into memory (never to disk) before any records are emitted, and interrupted downloads are retried from the start with exponential backoff (up to 5 attempts), so retries cannot duplicate or skip records.
+  * Fixes syncs failing with `Connection broken: IncompleteRead` when the connection drops mid-report. An interrupted report is now re-synced in full under a new activated version, with exponential backoff (up to 5 attempts), so records from the interrupted attempt are superseded rather than duplicated.
 
 ## 2.1.1
   * Fixes connection creation failing with `Unsupported Workday XSD datatype` errors by resolving XSD types generically from the report's schema instead of a fixed type list.

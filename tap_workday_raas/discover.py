@@ -190,7 +190,7 @@ def enrich_schema_from_data(schema, report_url, auth_client, sample_size=100):
 
     try:
         all_columns = {}  # column_name -> first non-None sample value
-        for i, record in enumerate(stream_report(report_url, auth_client, buffered=False)):
+        for i, record in enumerate(stream_report(report_url, auth_client)):
             for key, value in record.items():
                 if key not in all_columns or all_columns[key] is None:
                     all_columns[key] = value
