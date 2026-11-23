@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import patch, MagicMock
 import time
 
+import requests
+
 from tap_workday_raas.client import WorkdayOAuthClient
 from tap_workday_raas.sync import sync_report
 from tap_workday_raas.schema_utils import infer_schema_from_value
@@ -351,3 +353,59 @@ class TestSyncReportSchemaEvolution(unittest.TestCase):
             emitted_schema["properties"]["new_null"],
             {"type": ["string", "null"]}
         )
+
+
+# ---------------------------------------------------------------------------
+# Tests for sync_report – versioned re-sync on interrupted reports (SAC-32691)
+# ---------------------------------------------------------------------------
+
+def _interrupted_report(records):
+    yield from records
+    raise requests.exceptions.ChunkedEncodingError(
+        "Connection broken: IncompleteRead(505 bytes read, 7 more expected)"
+    )
+
+
+@patch("time.sleep")
+@patch("tap_workday_raas.sync.singer")
+@patch("tap_workday_raas.sync.stream_report")
+class TestSyncReportVersionedResync(unittest.TestCase):
+
+    def _report(self):
+        return {"report_url": "http://fake", "report_name": "test_report"}
+
+    def _stream(self):
+        return _make_stream("test", {"type": "object", "properties": {"id": {"type": ["string", "null"]}}})
+
+    def test_interrupted_sync_restarts_under_new_version(self, mock_stream_report, mock_singer, _sleep):
+        mock_stream_report.side_effect = [
+            _interrupted_report([{"id": "1"}]),
+            iter([{"id": "1"}, {"id": "2"}]),
+        ]
+
+        count = sync_report(self._report(), self._stream(), _make_auth_client())
+
+        self.assertEqual(count, 2)
+        versions = [c[0][1] for c in mock_singer.write_version.call_args_list]
+        self.assertEqual(len(versions), 2)
+        self.assertGreater(versions[1], versions[0])
+        record_versions = [c[1]["version"] for c in mock_singer.RecordMessage.call_args_list]
+        self.assertEqual(record_versions, [versions[0], versions[1], versions[1]])
+
+    def test_retries_exhausted_raises(self, mock_stream_report, mock_singer, _sleep):
+        mock_stream_report.side_effect = lambda *a, **kw: _interrupted_report([{"id": "1"}])
+
+        with self.assertRaises(requests.exceptions.ChunkedEncodingError):
+            sync_report(self._report(), self._stream(), _make_auth_client())
+
+        self.assertEqual(mock_stream_report.call_count, 5)
+        self.assertEqual(mock_singer.write_version.call_count, 5)
+
+    def test_http_error_is_not_retried(self, mock_stream_report, mock_singer, _sleep):
+        mock_stream_report.side_effect = requests.exceptions.HTTPError("500 Server Error")
+
+        with self.assertRaises(requests.exceptions.HTTPError):
+            sync_report(self._report(), self._stream(), _make_auth_client())
+
+        self.assertEqual(mock_stream_report.call_count, 1)
+        self.assertEqual(mock_singer.write_version.call_count, 1)
